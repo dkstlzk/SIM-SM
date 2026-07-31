@@ -33,6 +33,12 @@ set(ARCHITECTURE_SOURCES
     src/architecture/warp.cpp
     src/architecture/thread.cpp
     src/architecture/kernel.cpp
+    src/architecture/flat_memory.cpp
+    src/architecture/register_file.cpp
+)
+
+set(EXECUTION_SOURCES
+    src/execution/instruction_executor.cpp
 )
 
 set(RUNTIME_SOURCES
@@ -41,6 +47,7 @@ set(RUNTIME_SOURCES
 
 set(CORE_SOURCES
     ${ARCHITECTURE_SOURCES}
+    ${EXECUTION_SOURCES}
     ${RUNTIME_SOURCES}
 )
 
@@ -56,7 +63,7 @@ target_link_libraries(gpu-sim PRIVATE sim_sm_core)
 target_compile_options(gpu-sim PRIVATE -Wall -Wextra -Wpedantic)
 
 # Tests
-add_executable(gpu-sim-tests tests/architecture_test.cpp)
+add_executable(gpu-sim-tests tests/architecture_test.cpp tests/execution_test.cpp)
 target_link_libraries(gpu-sim-tests PRIVATE sim_sm_core gtest_main)
 target_compile_options(gpu-sim-tests PRIVATE -Wall -Wextra -Wpedantic)
 
