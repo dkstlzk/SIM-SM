@@ -1,1 +1,22 @@
+# Build directories
 build/
+build-*/
+out/
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore tex files
+*.tex
