@@ -68,9 +68,7 @@ void SM::tick(const Kernel& kernel, FlatMemory& memory) {
     // 3. Fetch instruction
     size_t pc = selected_warp->get_warp_pc();
     if (pc >= kernel.instructions().size()) {
-        selected_warp->set_completed();
-        counters_.add_stall(StallReason::NoReadyWarp);
-        return;
+        throw std::runtime_error("Invariant violation: non-completed warp has invalid PC.");
     }
     const Instruction& inst = kernel.instructions()[pc];
 
@@ -83,23 +81,21 @@ void SM::tick(const Kernel& kernel, FlatMemory& memory) {
     }
 
     // 5. Check and update PC
-    if (selected_warp->get_threads().empty()) {
-        selected_warp->set_warp_pc(pc + 1);
-    } else {
-        size_t next_pc = static_cast<size_t>(selected_warp->get_threads()[0].pc());
+    size_t next_pc = pc + 1;
+    if (!selected_warp->get_threads().empty()) {
+        next_pc = static_cast<size_t>(selected_warp->get_threads()[0].pc());
         for (const auto& thread : selected_warp->get_threads()) {
             if (static_cast<size_t>(thread.pc()) != next_pc) {
                 throw std::runtime_error("Invariant violation: thread PCs diverged after execution.");
             }
         }
-        selected_warp->set_warp_pc(next_pc);
-        if (next_pc >= kernel.instructions().size()) {
-            selected_warp->set_completed();
-        }
     }
+    selected_warp->set_warp_pc(next_pc);
 
-    // 6. Apply synthetic latency for Week 1 Day 3 experiments
-    if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::STORE || inst.opcode == Opcode::MUL) {
+    // 6. State transition and synthetic latency
+    if (next_pc >= kernel.instructions().size()) {
+        selected_warp->set_completed();
+    } else if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::STORE || inst.opcode == Opcode::MUL) {
         selected_warp->stall(5);
     }
 

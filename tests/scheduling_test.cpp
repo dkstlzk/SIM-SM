@@ -62,23 +62,61 @@ TEST_F(SchedulingTest, RoundRobinSchedulerUnit) {
     warps.emplace_back(0);
     warps.emplace_back(1);
     warps.emplace_back(2);
-
     RoundRobinScheduler scheduler;
     
-    // Initially last is 0, so next is 1
-    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
-    
-    // Next is 2
-    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
-    
-    // Next is 0
-    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0);
+    // Initially next is 0
+    Warp* selected = scheduler.select_warp(warps);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected->get_warp_id(), 0);
+
+    // Next should be 1
+    selected = scheduler.select_warp(warps);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected->get_warp_id(), 1);
+
+    // Next should be 2
+    selected = scheduler.select_warp(warps);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected->get_warp_id(), 2);
+
+    // Next should wrap around to 0
+    selected = scheduler.select_warp(warps);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected->get_warp_id(), 0);
     
     // Stall warp 1
     warps[1].stall(5);
     
-    // Next from 0 should be 2 (skipping 1)
+    // Next should skip 1 and select 2
     EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
+}
+
+TEST_F(SchedulingTest, FinalInstructionCompletesWarp) {
+    SM sm(0);
+    sm.set_scheduler(std::make_unique<GreedyScheduler>());
+    
+    Warp warp(0);
+    for (int i = 0; i < 32; ++i) {
+        warp.add_thread(Thread(i, i, 0, 0, 0));
+    }
+    sm.add_warp(warp);
+
+    // Kernel with a single LOAD instruction
+    std::vector<Instruction> insts = {
+        {Opcode::LOAD, 1, 0, 0, 10}
+    };
+    Kernel kernel("single_load", insts);
+    
+    FlatMemory memory(1024);
+
+    while (!sm.is_completed()) {
+        sm.tick(kernel, memory);
+    }
+
+    for (const auto& w : sm.get_warps()) {
+        EXPECT_EQ(w.get_state(), WarpState::Completed);
+        EXPECT_EQ(w.get_warp_pc(), kernel.instructions().size());
+    }
 }
 
 TEST_F(SchedulingTest, SMExecutionIntegration) {
@@ -111,8 +149,8 @@ TEST_F(SchedulingTest, SMExecutionIntegration) {
 
     // Just assert that both complete and log their performance counters
     // We observe deterministic cycle counts for this specific workload
-    EXPECT_EQ(greedy_cycles, 20);
-    EXPECT_EQ(rr_cycles, 21);
+    EXPECT_EQ(greedy_cycles, 15);
+    EXPECT_EQ(rr_cycles, 16);
     
     // Verify IPC calculation
     double rr_ipc = sm_rr.get_counters().get_ipc();

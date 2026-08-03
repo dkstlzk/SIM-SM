@@ -6,12 +6,12 @@ Warp* RoundRobinScheduler::select_warp(std::vector<Warp>& warps) {
     if (warps.empty()) return nullptr;
 
     size_t num_warps = warps.size();
-    size_t start_idx = (last_issued_warp_id_ + 1) % num_warps;
+    if (num_warps == 0) return nullptr;
 
     for (size_t i = 0; i < num_warps; ++i) {
-        size_t idx = (start_idx + i) % num_warps;
+        size_t idx = (next_warp_index_ + i) % num_warps;
         if (warps[idx].get_state() == WarpState::Ready) {
-            last_issued_warp_id_ = idx;
+            next_warp_index_ = (idx + 1) % num_warps;
             return &warps[idx];
         }
     }

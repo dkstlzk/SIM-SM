@@ -10,7 +10,7 @@ public:
     Warp* select_warp(std::vector<Warp>& warps) override;
 
 private:
-    size_t last_issued_warp_id_{0};
+    size_t next_warp_index_{0};
 };
 
 } // namespace sim_sm
