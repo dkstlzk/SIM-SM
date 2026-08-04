@@ -1,8 +1,8 @@
 #pragma once
 
 #include "instruction/instruction.hpp"
-#include "architecture/thread.hpp"
-#include "architecture/flat_memory.hpp"
+#include "architecture/warp.hpp"
+#include "memory/memory_system.hpp"
 
 namespace sim_sm {
 
@@ -12,9 +12,14 @@ enum class ExecutionStatus {
     BarrierReached
 };
 
+struct ExecutionResult {
+    ExecutionStatus status;
+    size_t latency;
+};
+
 class InstructionExecutor {
 public:
-    static ExecutionStatus execute(const Instruction& inst, Thread& thread, FlatMemory& memory);
+    static ExecutionResult execute(const Instruction& inst, Warp& warp, MemorySystem& memory);
 };
 
 } // namespace sim_sm

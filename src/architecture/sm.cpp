@@ -4,7 +4,8 @@
 
 namespace sim_sm {
 
-SM::SM(size_t sm_id) : sm_id_(sm_id) {}
+SM::SM(size_t sm_id, size_t l1_sets, size_t l1_assoc, size_t l1_line_size)
+    : sm_id_(sm_id), l1_cache_(l1_sets, l1_assoc, l1_line_size, "LRU"), shared_memory_(65536) {}
 
 size_t SM::get_sm_id() const {
     return sm_id_;
@@ -36,7 +37,7 @@ bool SM::is_completed() const {
     return true;
 }
 
-void SM::tick(const Kernel& kernel, FlatMemory& memory) {
+void SM::tick(const Kernel& kernel, MemorySystem& memory) {
     if (is_completed()) {
         return;
     }
@@ -72,13 +73,15 @@ void SM::tick(const Kernel& kernel, FlatMemory& memory) {
     }
     const Instruction& inst = kernel.instructions()[pc];
 
-    // 4. Execute for all threads (enforcing no divergence)
+    // 4. Execute for all threads (now handled by executor taking Warp)
+    // First, verify PCs are uniform
     for (auto& thread : selected_warp->get_threads()) {
         if (static_cast<size_t>(thread.pc()) != pc) {
             throw std::runtime_error("Invariant violation: thread PC diverged from warp PC prior to execution.");
         }
-        InstructionExecutor::execute(inst, thread, memory);
     }
+    
+    ExecutionResult result = InstructionExecutor::execute(inst, *selected_warp, memory);
 
     // 5. Check and update PC
     size_t next_pc = pc + 1;
@@ -92,11 +95,12 @@ void SM::tick(const Kernel& kernel, FlatMemory& memory) {
     }
     selected_warp->set_warp_pc(next_pc);
 
-    // 6. State transition and synthetic latency
+    // 6. State transition and execution latency stall
     if (next_pc >= kernel.instructions().size()) {
         selected_warp->set_completed();
-    } else if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::STORE || inst.opcode == Opcode::MUL) {
-        selected_warp->stall(5);
+    } else if (result.latency > 1) {
+        // latency = total simulated cycles consumed by the memory instruction, including its issue cycle
+        selected_warp->stall(result.latency - 1);
     }
 
     counters_.increment_instructions_retired();

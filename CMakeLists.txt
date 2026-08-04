@@ -24,7 +24,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
-# Source files (to be added)
 set(ARCHITECTURE_SOURCES
     src/architecture/gpu.cpp
     src/architecture/sm.cpp
@@ -35,6 +34,12 @@ set(ARCHITECTURE_SOURCES
     src/architecture/kernel.cpp
     src/architecture/flat_memory.cpp
     src/architecture/register_file.cpp
+)
+
+set(MEMORY_SOURCES
+    src/memory/lru_policy.cpp
+    src/memory/cache.cpp
+    src/memory/memory_system.cpp
 )
 
 set(EXECUTION_SOURCES
@@ -56,6 +61,7 @@ set(CORE_SOURCES
     ${EXECUTION_SOURCES}
     ${SCHEDULING_SOURCES}
     ${RUNTIME_SOURCES}
+    ${MEMORY_SOURCES}
 )
 
 # Core Library
@@ -70,7 +76,7 @@ target_link_libraries(gpu-sim PRIVATE sim_sm_core)
 target_compile_options(gpu-sim PRIVATE -Wall -Wextra -Wpedantic)
 
 # Tests
-add_executable(gpu-sim-tests tests/architecture_test.cpp tests/execution_test.cpp tests/scheduling_test.cpp)
+add_executable(gpu-sim-tests tests/architecture_test.cpp tests/execution_test.cpp tests/scheduling_test.cpp tests/memory_test.cpp)
 target_link_libraries(gpu-sim-tests PRIVATE sim_sm_core gtest_main)
 target_compile_options(gpu-sim-tests PRIVATE -Wall -Wextra -Wpedantic)
 

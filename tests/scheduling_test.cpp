@@ -2,9 +2,12 @@
 #include "architecture/sm.hpp"
 #include "architecture/warp.hpp"
 #include "architecture/kernel.hpp"
-#include "architecture/flat_memory.hpp"
 #include "scheduling/greedy_scheduler.hpp"
 #include "scheduling/round_robin_scheduler.hpp"
+#include "memory/memory_system.hpp"
+#include "memory/cache.hpp"
+#include "memory/shared_memory.hpp"
+#include "memory/global_memory.hpp"
 
 using namespace sim_sm;
 
@@ -30,6 +33,19 @@ protected:
             }
             sm.add_warp(warp);
         }
+    }
+
+    SharedMemory shared_mem_{65536};
+    Cache l1_cache_{4, 4, 32};
+    Cache l2_cache_{16, 8, 32};
+    GlobalMemory global_mem_{1048576};
+
+    std::unique_ptr<MemorySystem> create_memory_system() {
+        MemoryAccessConfig config;
+        config.l1_latency = 5;
+        config.l2_latency = 0;
+        config.global_memory_latency = 0; // Total latency 5 cycles regardless of hit/miss
+        return std::make_unique<MemorySystem>(shared_mem_, l1_cache_, l2_cache_, global_mem_, config);
     }
 };
 
@@ -107,10 +123,10 @@ TEST_F(SchedulingTest, FinalInstructionCompletesWarp) {
     };
     Kernel kernel("single_load", insts);
     
-    FlatMemory memory(1024);
+    auto memory = create_memory_system();
 
     while (!sm.is_completed()) {
-        sm.tick(kernel, memory);
+        sm.tick(kernel, *memory);
     }
 
     for (const auto& w : sm.get_warps()) {
@@ -121,7 +137,7 @@ TEST_F(SchedulingTest, FinalInstructionCompletesWarp) {
 
 TEST_F(SchedulingTest, SMExecutionIntegration) {
     Kernel kernel = create_controlled_workload();
-    FlatMemory memory(100);
+    auto memory = create_memory_system();
 
     SM sm_greedy(0);
     setup_sm(sm_greedy, 2);
@@ -133,11 +149,11 @@ TEST_F(SchedulingTest, SMExecutionIntegration) {
 
     // Run both to completion
     while (!sm_greedy.is_completed()) {
-        sm_greedy.tick(kernel, memory);
+        sm_greedy.tick(kernel, *memory);
     }
 
     while (!sm_rr.is_completed()) {
-        sm_rr.tick(kernel, memory);
+        sm_rr.tick(kernel, *memory);
     }
 
     // Both should have retired 10 instructions (5 per warp * 2 warps)
@@ -149,8 +165,11 @@ TEST_F(SchedulingTest, SMExecutionIntegration) {
 
     // Just assert that both complete and log their performance counters
     // We observe deterministic cycle counts for this specific workload
-    EXPECT_EQ(greedy_cycles, 15);
-    EXPECT_EQ(rr_cycles, 16);
+    // Cycles changed because MUL no longer has synthetic latency, and stall is now (latency - 1)
+    // 2 warps, 5 instructions each.
+    // Latencies: MOV(1), LOAD(5 -> stall 4), ADD(1), MUL(1), STORE(5 -> stall 4).
+    EXPECT_EQ(greedy_cycles, 11);
+    EXPECT_EQ(rr_cycles, 12);
     
     // Verify IPC calculation
     double rr_ipc = sm_rr.get_counters().get_ipc();
