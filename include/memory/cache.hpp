@@ -25,6 +25,7 @@ public:
     bool access(size_t address);
 
     const CacheStats& stats() const { return stats_; }
+    size_t line_size() const { return line_size_; }
 
 private:
     size_t num_sets_;

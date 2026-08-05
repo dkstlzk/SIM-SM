@@ -36,7 +36,7 @@ TEST_F(ExecutionTest, StraightLineExecution) {
     // ADD R2, R0, R1
     // MUL R3, R2, R1
     // SUB R4, R3, R0
-    
+
     std::vector<Instruction> insts = {
         {Opcode::MOV, 0, -1, 0, 5},
         {Opcode::MOV, 1, -1, 0, 7},
@@ -113,4 +113,51 @@ TEST_F(ExecutionTest, BranchExecutionNotTaken) {
 TEST_F(ExecutionTest, BarrierExecution) {
     Instruction barrier_inst = {Opcode::BARRIER, 0, 0, 0, 0};
     EXPECT_EQ(InstructionExecutor::execute(barrier_inst, warp_, memory_).status, ExecutionStatus::BarrierReached);
+}
+
+TEST_F(ExecutionTest, CoalescedLoadExecution) {
+    Warp full_warp(0);
+    for (int i = 0; i < 32; ++i) {
+        Thread t(i, 0, 0, 0, 0);
+        // Base address in R0 is 0
+        t.registers().write(0, 0);
+        full_warp.add_thread(t);
+    }
+
+    // LOAD R1, [R0 + (thread_id * 4)] is what we want, but wait...
+    // Our ISA doesn't have thread_id.
+    // We can pre-load R0 with different values for each thread!
+    for (int i = 0; i < 32; ++i) {
+        full_warp.get_threads()[i].registers().write(0, i * 4);
+    }
+
+    Instruction load_inst = {Opcode::LOAD, 1, 0, -1, 0};
+    ExecutionResult result = InstructionExecutor::execute(load_inst, full_warp, memory_);
+
+    // Line size is 32 bytes (set in test setup).
+    // 32 threads * 4 bytes = 128 bytes.
+    // 128 bytes / 32 bytes = 4 cache lines = 4 transactions.
+    EXPECT_EQ(result.memory_transactions, 4);
+
+    // Latency = base latency (e.g. L1 hit is 1 cycle, or miss is 10 cycles etc.)
+    // If it's a miss, base latency = L1_miss_penalty + L1_hit_latency = 10 + 1 = 11?
+    // Let's assume memory access gives some max_latency, and total = max_latency + (4 - 1).
+    // The exact cycle count depends on the cache miss/hit state.
+    // We just verify the transaction count for now, and that latency is reasonable.
+    EXPECT_GT(result.latency, 3);
+}
+
+TEST_F(ExecutionTest, StridedLoadExecution) {
+    Warp full_warp(0);
+    for (int i = 0; i < 32; ++i) {
+        Thread t(i, 0, 0, 0, 0);
+        t.registers().write(0, i * 32); // stride of 32 bytes
+        full_warp.add_thread(t);
+    }
+
+    Instruction load_inst = {Opcode::LOAD, 1, 0, -1, 0};
+    ExecutionResult result = InstructionExecutor::execute(load_inst, full_warp, memory_);
+
+    // 32 threads, each in a different 32-byte cache line = 32 transactions.
+    EXPECT_EQ(result.memory_transactions, 32);
 }

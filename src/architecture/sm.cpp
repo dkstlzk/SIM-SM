@@ -80,8 +80,13 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
             throw std::runtime_error("Invariant violation: thread PC diverged from warp PC prior to execution.");
         }
     }
-    
+
     ExecutionResult result = InstructionExecutor::execute(inst, *selected_warp, memory);
+
+    if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::STORE) {
+        counters_.increment_memory_instructions();
+        counters_.add_memory_transactions(result.memory_transactions);
+    }
 
     // 5. Check and update PC
     size_t next_pc = pc + 1;

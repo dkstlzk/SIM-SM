@@ -25,11 +25,21 @@ public:
     // IPC (simulated warp-instruction IPC)
     double get_ipc() const;
 
+    // Memory tracking
+    void increment_memory_instructions();
+    void add_memory_transactions(size_t transactions);
+
+    size_t get_memory_instructions() const;
+    size_t get_memory_transactions() const;
+    double get_transactions_per_memory_instruction() const;
+
 private:
     size_t cycles_{0};
     size_t instructions_retired_{0};
     size_t stall_cycles_{0};
     std::map<StallReason, size_t> stall_reasons_;
+    size_t memory_instructions_{0};
+    size_t memory_transactions_{0};
 };
 
 } // namespace sim_sm

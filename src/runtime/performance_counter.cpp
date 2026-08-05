@@ -40,4 +40,25 @@ double PerformanceCounter::get_ipc() const {
     return static_cast<double>(instructions_retired_) / cycles_;
 }
 
+void PerformanceCounter::increment_memory_instructions() {
+    memory_instructions_++;
+}
+
+void PerformanceCounter::add_memory_transactions(size_t transactions) {
+    memory_transactions_ += transactions;
+}
+
+size_t PerformanceCounter::get_memory_instructions() const {
+    return memory_instructions_;
+}
+
+size_t PerformanceCounter::get_memory_transactions() const {
+    return memory_transactions_;
+}
+
+double PerformanceCounter::get_transactions_per_memory_instruction() const {
+    if (memory_instructions_ == 0) return 0.0;
+    return static_cast<double>(memory_transactions_) / memory_instructions_;
+}
+
 } // namespace sim_sm

@@ -15,6 +15,7 @@ enum class ExecutionStatus {
 struct ExecutionResult {
     ExecutionStatus status;
     size_t latency;
+    size_t memory_transactions = 0;
 };
 
 class InstructionExecutor {

@@ -1,4 +1,6 @@
 #include "memory/memory_system.hpp"
+#include "memory/memory_coalescer.hpp"
+#include <algorithm>
 
 namespace sim_sm {
 
@@ -31,6 +33,50 @@ size_t MemorySystem::store(size_t address, int value) {
     return latency;
 }
 
+WarpMemoryResult MemorySystem::warp_load(const std::vector<size_t>& addresses, std::vector<int>& out_values) {
+    out_values.resize(addresses.size());
+
+    // Coalesce addresses into cache line transactions
+    std::vector<size_t> transactions = MemoryCoalescer::coalesce(addresses, get_l1_line_size());
+
+    size_t max_latency = 1;
+    for (size_t line_base : transactions) {
+        size_t latency = access_latency(line_base);
+        max_latency = std::max(max_latency, latency);
+    }
+
+    // Actually load the data for each thread
+    for (size_t i = 0; i < addresses.size(); ++i) {
+        out_values[i] = global_memory_.load(addresses[i]);
+    }
+
+    // Total latency: max latency + issue cost for additional transactions (issue cost = 1)
+    size_t total_latency = max_latency + (transactions.size() > 0 ? transactions.size() - 1 : 0);
+
+    return {total_latency, transactions.size()};
+}
+
+WarpMemoryResult MemorySystem::warp_store(const std::vector<size_t>& addresses, const std::vector<int>& values) {
+    // Coalesce addresses into cache line transactions
+    std::vector<size_t> transactions = MemoryCoalescer::coalesce(addresses, get_l1_line_size());
+
+    size_t max_latency = 1;
+    for (size_t line_base : transactions) {
+        size_t latency = access_latency(line_base);
+        max_latency = std::max(max_latency, latency);
+    }
+
+    // Actually store the data for each thread
+    for (size_t i = 0; i < addresses.size(); ++i) {
+        global_memory_.store(addresses[i], values[i]);
+    }
+
+    // Total latency: max latency + issue cost for additional transactions (issue cost = 1)
+    size_t total_latency = max_latency + (transactions.size() > 0 ? transactions.size() - 1 : 0);
+
+    return {total_latency, transactions.size()};
+}
+
 size_t MemorySystem::shared_load(size_t address, int& out_value) {
     out_value = shared_memory_.load(address);
     return config_.shared_memory_latency;
@@ -53,10 +99,14 @@ double MemorySystem::compute_amat() const {
 
     double miss_penalty_l2 = config_.global_memory_latency;
     double miss_penalty_l1 = config_.l2_latency + (l2_miss_rate * miss_penalty_l2);
-    
+
     double amat = config_.l1_latency + (l1_miss_rate * miss_penalty_l1);
-    
+
     return amat;
+}
+
+size_t MemorySystem::get_l1_line_size() const {
+    return l1_cache_.line_size(); // Assuming line_size() exists on Cache
 }
 
 } // namespace sim_sm

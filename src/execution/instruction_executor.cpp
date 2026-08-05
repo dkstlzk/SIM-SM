@@ -6,6 +6,7 @@ namespace sim_sm {
 ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp, MemorySystem& memory) {
     ExecutionStatus overall_status = ExecutionStatus::Completed;
     size_t max_latency = 1; // Default latency
+    size_t memory_transactions = 0;
 
     switch (inst.opcode) {
         case Opcode::ADD: {
@@ -48,27 +49,39 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
             break;
         }
         case Opcode::LOAD: {
-            std::vector<size_t> addresses(warp.get_threads().size(), inst.immediate);
+            std::vector<size_t> addresses(warp.get_threads().size());
             for (size_t i = 0; i < warp.get_threads().size(); ++i) {
-                int val = 0;
-                size_t latency = memory.load(addresses[i], val);
-                warp.get_threads()[i].registers().write(inst.dst, val);
+                size_t base = (inst.src1 != -1) ? warp.get_threads()[i].registers().read(inst.src1) : 0;
+                addresses[i] = base + inst.immediate;
+            }
+
+            std::vector<int> out_values;
+            WarpMemoryResult res = memory.warp_load(addresses, out_values);
+            max_latency = res.total_latency;
+            memory_transactions = res.num_transactions;
+
+            for (size_t i = 0; i < warp.get_threads().size(); ++i) {
+                warp.get_threads()[i].registers().write(inst.dst, out_values[i]);
                 warp.get_threads()[i].set_pc(warp.get_threads()[i].pc() + 1);
-                max_latency = std::max(max_latency, latency);
             }
             break;
         }
         case Opcode::STORE: {
-            std::vector<size_t> addresses;
-            std::vector<int> values;
-            for (auto& thread : warp.get_threads()) {
-                addresses.push_back(inst.immediate);
-                values.push_back(thread.registers().read(inst.src1));
-            }
+            std::vector<size_t> addresses(warp.get_threads().size());
+            std::vector<int> values(warp.get_threads().size());
             for (size_t i = 0; i < warp.get_threads().size(); ++i) {
-                size_t latency = memory.store(addresses[i], values[i]);
+                // src2 is used as base address register for store if provided, otherwise 0
+                size_t base = (inst.src2 != -1) ? warp.get_threads()[i].registers().read(inst.src2) : 0;
+                addresses[i] = base + inst.immediate;
+                values[i] = warp.get_threads()[i].registers().read(inst.src1);
+            }
+
+            WarpMemoryResult res = memory.warp_store(addresses, values);
+            max_latency = res.total_latency;
+            memory_transactions = res.num_transactions;
+
+            for (size_t i = 0; i < warp.get_threads().size(); ++i) {
                 warp.get_threads()[i].set_pc(warp.get_threads()[i].pc() + 1);
-                max_latency = std::max(max_latency, latency);
             }
             break;
         }
@@ -103,7 +116,7 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
             throw std::runtime_error("Unknown opcode");
     }
 
-    return {overall_status, max_latency};
+    return {overall_status, max_latency, memory_transactions};
 }
 
 } // namespace sim_sm

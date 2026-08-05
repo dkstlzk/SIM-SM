@@ -14,6 +14,11 @@ struct MemoryAccessConfig {
     size_t global_memory_latency = 100;
 };
 
+struct WarpMemoryResult {
+    size_t total_latency;
+    size_t num_transactions;
+};
+
 class MemorySystem {
 public:
     MemorySystem(SharedMemory& shared_memory, Cache& l1_cache, Cache& l2_cache, GlobalMemory& global_memory, const MemoryAccessConfig& config = {})
@@ -25,12 +30,18 @@ public:
     // Simulates a global memory store. Returns the simulated latency in cycles.
     size_t store(size_t address, int value);
 
+    // Warp-level global memory accesses (coalesced)
+    WarpMemoryResult warp_load(const std::vector<size_t>& addresses, std::vector<int>& out_values);
+    WarpMemoryResult warp_store(const std::vector<size_t>& addresses, const std::vector<int>& values);
+
     // Explicitly access shared memory (not part of the global load/store ISA for Week 1)
     size_t shared_load(size_t address, int& out_value);
     size_t shared_store(size_t address, int value);
 
     // AMAT Calculation
     double compute_amat() const;
+
+    size_t get_l1_line_size() const;
 
 private:
     SharedMemory& shared_memory_;
