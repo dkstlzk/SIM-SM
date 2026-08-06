@@ -4,6 +4,7 @@
 #include "architecture/thread_block.hpp"
 #include "architecture/warp.hpp"
 #include "architecture/thread.hpp"
+#include "runtime/benchmarks.hpp"
 
 #include <iostream>
 #include <string>
@@ -20,19 +21,42 @@ int main(int argc, char** argv) {
     // Allow empty grid (0 threads) per requirements, but default to uninitialized (-1) to check if passed
     long long num_threads_arg = -1;
 
+    bool run_benchmarks = false;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--config" && i + 1 < argc) {
             config_path = argv[++i];
         } else if (arg == "--threads" && i + 1 < argc) {
             num_threads_arg = std::stoll(argv[++i]);
+        } else if (arg == "--benchmark") {
+            if (i + 1 < argc) {
+                // handle "all" argument if provided, but we'll just run all
+                std::string b_type = argv[++i];
+            }
+            run_benchmarks = true;
         } else {
             print_usage(argv[0]);
             return EXIT_FAILURE;
         }
     }
 
-    if (config_path.empty() || num_threads_arg < 0) {
+    if (config_path.empty()) {
+        print_usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    if (run_benchmarks) {
+        try {
+            sim_sm::run_benchmarks(config_path);
+            std::cout << "Benchmarks completed successfully. Results written to /results/\n";
+            return EXIT_SUCCESS;
+        } catch (const std::exception& e) {
+            std::cerr << "Benchmark error: " << e.what() << "\n";
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (num_threads_arg < 0) {
         print_usage(argv[0]);
         return EXIT_FAILURE;
     }

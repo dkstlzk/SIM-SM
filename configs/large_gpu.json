@@ -1,9 +1,9 @@
 {
-    "num_sms": 4,
+    "num_sms": 16,
     "warp_size": 32,
     "block_size": 128,
     "max_threads_per_sm": 2048,
     "max_blocks_per_sm": 32,
-    "max_shared_memory_per_sm": 65536,
+    "max_shared_memory_per_sm": 98304,
     "max_registers_per_sm": 65536
 }

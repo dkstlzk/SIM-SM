@@ -37,6 +37,10 @@ bool SM::is_completed() const {
     return true;
 }
 
+void SM::clear_warps() {
+    warps_.clear();
+}
+
 void SM::tick(const Kernel& kernel, MemorySystem& memory) {
     if (is_completed()) {
         return;

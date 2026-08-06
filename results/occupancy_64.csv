@@ -1,0 +1,2 @@
+Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM
+occupancy_64,4,44698,25600,0.57,19200,93568,1.00,32

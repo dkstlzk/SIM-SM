@@ -4,6 +4,7 @@
 #include "architecture/thread_block.hpp"
 #include "architecture/warp.hpp"
 #include "architecture/thread.hpp"
+#include "scheduling/round_robin_scheduler.hpp"
 
 namespace {
 
@@ -102,4 +103,68 @@ TEST(ArchitectureTest, EmptyGrid) {
     
     EXPECT_EQ(grid.get_blocks().size(), 0);
     EXPECT_EQ(total_warps, 0);
+}
+
+#include "architecture/occupancy.hpp"
+
+using namespace sim_sm;
+
+TEST(OccupancyTest, MaxThreadsLimit) {
+    SystemConfig config = {4, 32, 256, 2048, 32, 65536, 65536};
+    KernelResourceRequirements req = {10, 1024}; 
+    // 256 threads -> max blocks by threads = 2048 / 256 = 8
+    
+    OccupancyResult result = OccupancyCalculator::compute(config, req);
+    EXPECT_EQ(result.resident_blocks, 8);
+    EXPECT_EQ(result.resident_warps, 8 * (256/32)); // 8 * 8 = 64
+    EXPECT_DOUBLE_EQ(result.occupancy_percentage, 64.0 / (2048/32)); // 64 / 64 = 1.0
+}
+
+TEST(OccupancyTest, MaxSharedMemoryLimit) {
+    SystemConfig config = {4, 32, 128, 2048, 32, 65536, 65536};
+    KernelResourceRequirements req = {10, 32768}; // 32KB per block
+    // blocks by memory = 65536 / 32768 = 2
+    
+    OccupancyResult result = OccupancyCalculator::compute(config, req);
+    EXPECT_EQ(result.resident_blocks, 2);
+    EXPECT_EQ(result.resident_warps, 2 * (128/32)); // 8
+    EXPECT_DOUBLE_EQ(result.occupancy_percentage, 8.0 / 64.0);
+}
+
+TEST(OccupancyTest, MaxRegistersLimit) {
+    SystemConfig config = {4, 32, 128, 2048, 32, 65536, 65536};
+    KernelResourceRequirements req = {256, 0}; // 128 threads, 256 regs/thread -> 32768 regs/block
+    // blocks by registers = 65536 / 32768 = 2
+    
+    OccupancyResult result = OccupancyCalculator::compute(config, req);
+    EXPECT_EQ(result.resident_blocks, 2);
+}
+
+TEST(GPUTest, MultipleWavesDispatch) {
+    SystemConfig config = {1, 32, 128, 2048, 32, 65536, 65536};
+    GPU gpu(1, 4, 4, 16, 8, 32, 1048576);
+    
+    for (auto& sm : gpu.get_sms()) {
+        sm.set_scheduler(std::make_unique<RoundRobinScheduler>());
+    }
+    
+    // 10 blocks of 128 threads.
+    size_t total_warps = 0;
+    Grid grid = build_grid(1280, 128, 32, total_warps);
+    EXPECT_EQ(grid.get_blocks().size(), 10);
+    
+    // Limit resident blocks to 2
+    KernelResourceRequirements req = {10, 32768}; // 32KB shared mem per block -> 65536/32768 = 2 blocks per SM
+    
+    // Simple kernel with 1 instruction
+    Kernel kernel("dummy", {{Opcode::BARRIER, 0, 0, 0, 0}});
+    
+    gpu.launch_kernel(kernel, grid, config, req);
+    gpu.run_to_completion(kernel);
+    
+    size_t total_insts = 0;
+    for (const auto& sm : gpu.get_sms()) {
+        total_insts += sm.get_counters().get_instructions_retired();
+    }
+    EXPECT_EQ(total_insts, total_warps);
 }

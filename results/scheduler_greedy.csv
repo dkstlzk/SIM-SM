@@ -1,0 +1,2 @@
+Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM
+scheduler_greedy,4,38461,25600,0.67,19200,93568,1.00,16

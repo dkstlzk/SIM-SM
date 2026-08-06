@@ -34,6 +34,7 @@ set(ARCHITECTURE_SOURCES
     src/architecture/kernel.cpp
     src/architecture/flat_memory.cpp
     src/architecture/register_file.cpp
+    src/architecture/occupancy.cpp
 )
 
 set(MEMORY_SOURCES
@@ -54,6 +55,7 @@ set(SCHEDULING_SOURCES
 
 set(RUNTIME_SOURCES
     src/runtime/config.cpp
+    src/runtime/benchmarks.cpp
     src/runtime/performance_counter.cpp
 )
 

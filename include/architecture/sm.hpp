@@ -30,6 +30,8 @@ public:
     const PerformanceCounter& get_counters() const;
     std::vector<Warp>& get_warps();
     bool is_completed() const;
+    void clear_warps();
+    
     
     Cache& get_l1_cache() { return l1_cache_; }
     const Cache& get_l1_cache() const { return l1_cache_; }

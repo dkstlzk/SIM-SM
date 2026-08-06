@@ -1,0 +1,2 @@
+Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM
+strided,4,52809,25600,0.48,19200,614400,1.00,16
