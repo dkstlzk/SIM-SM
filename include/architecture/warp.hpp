@@ -9,6 +9,7 @@ namespace sim_sm {
 enum class WarpState {
     Ready,
     Stalled,
+    StalledAtBarrier,
     Completed
 };
 
@@ -29,6 +30,8 @@ public:
     void stall(size_t cycles);
     void tick_stall();
     void set_completed();
+    void set_stalled_at_barrier();
+    void set_ready();
 
 private:
     size_t warp_id_;

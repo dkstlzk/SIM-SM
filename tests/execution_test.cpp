@@ -48,6 +48,7 @@ TEST_F(ExecutionTest, StraightLineExecution) {
     for (const auto& inst : insts) {
         ExecutionResult result = InstructionExecutor::execute(inst, warp_, memory_);
         EXPECT_EQ(result.status, ExecutionStatus::Completed);
+        warp_.set_warp_pc(warp_.get_warp_pc() + 1);
     }
 
     EXPECT_EQ(get_thread().registers().read(2), 12);
@@ -64,6 +65,7 @@ TEST_F(ExecutionTest, LoadStoreExecution) {
     Instruction load_inst = {Opcode::LOAD, 1, 0, 0, 10};
 
     EXPECT_EQ(InstructionExecutor::execute(store_inst, warp_, memory_).status, ExecutionStatus::Completed);
+    warp_.set_warp_pc(warp_.get_warp_pc() + 1);
     EXPECT_EQ(InstructionExecutor::execute(load_inst, warp_, memory_).status, ExecutionStatus::Completed);
 
     EXPECT_EQ(get_thread().registers().read(1), 42);
@@ -82,9 +84,11 @@ TEST_F(ExecutionTest, BranchExecutionTaken) {
     get_thread().registers().write(0, 10);
     get_thread().registers().write(1, 10);
     get_thread().set_pc(5);
+    warp_.set_warp_pc(5);
 
     Instruction cmp_inst = {Opcode::CMP, 0, 0, 1, 0};
     EXPECT_EQ(InstructionExecutor::execute(cmp_inst, warp_, memory_).status, ExecutionStatus::Completed);
+    warp_.set_warp_pc(warp_.get_warp_pc() + 1);
     EXPECT_TRUE(get_thread().predicate());
     EXPECT_EQ(get_thread().pc(), 6);
 
@@ -98,9 +102,11 @@ TEST_F(ExecutionTest, BranchExecutionNotTaken) {
     get_thread().registers().write(0, 10);
     get_thread().registers().write(1, 20); // Not equal
     get_thread().set_pc(5);
+    warp_.set_warp_pc(5);
 
     Instruction cmp_inst = {Opcode::CMP, 0, 0, 1, 0};
     EXPECT_EQ(InstructionExecutor::execute(cmp_inst, warp_, memory_).status, ExecutionStatus::Completed);
+    warp_.set_warp_pc(warp_.get_warp_pc() + 1);
     EXPECT_FALSE(get_thread().predicate());
     EXPECT_EQ(get_thread().pc(), 6);
 

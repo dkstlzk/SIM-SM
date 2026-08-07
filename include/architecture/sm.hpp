@@ -40,6 +40,8 @@ public:
     const SharedMemory& get_shared_memory() const { return shared_memory_; }
 
 private:
+    void handle_barrier_arrival(Warp& warp);
+
     size_t sm_id_;
     std::vector<Warp> warps_;
     std::unique_ptr<WarpScheduler> scheduler_;

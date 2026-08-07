@@ -56,4 +56,12 @@ void Warp::set_completed() {
     state_ = WarpState::Completed;
 }
 
+void Warp::set_stalled_at_barrier() {
+    state_ = WarpState::StalledAtBarrier;
+}
+
+void Warp::set_ready() {
+    state_ = WarpState::Ready;
+}
+
 } // namespace sim_sm

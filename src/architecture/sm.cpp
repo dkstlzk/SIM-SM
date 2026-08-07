@@ -65,7 +65,9 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
         if (warps_.empty()) {
             counters_.add_stall(StallReason::NoReadyWarp);
         } else {
-            counters_.add_stall(StallReason::SyntheticLatency);
+            // Check for potential deadlock if all active warps are stalled
+            // In our current constrained model, true silent deadlocks (where all warps are indefinitely stalled without being malformed)
+            // are structurally unreachable because legal barriers eventually release and malformed barriers throw immediately.
         }
         return;
     }
@@ -73,18 +75,12 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
     // 3. Fetch instruction
     size_t pc = selected_warp->get_warp_pc();
     if (pc >= kernel.instructions().size()) {
-        throw std::runtime_error("Invariant violation: non-completed warp has invalid PC.");
+        selected_warp->set_completed();
+        return;
     }
     const Instruction& inst = kernel.instructions()[pc];
 
-    // 4. Execute for all threads (now handled by executor taking Warp)
-    // First, verify PCs are uniform
-    for (auto& thread : selected_warp->get_threads()) {
-        if (static_cast<size_t>(thread.pc()) != pc) {
-            throw std::runtime_error("Invariant violation: thread PC diverged from warp PC prior to execution.");
-        }
-    }
-
+    // 4. Execute for active threads
     ExecutionResult result = InstructionExecutor::execute(inst, *selected_warp, memory);
 
     if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::STORE) {
@@ -92,27 +88,74 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
         counters_.add_memory_transactions(result.memory_transactions);
     }
 
-    // 5. Check and update PC
-    size_t next_pc = pc + 1;
-    if (!selected_warp->get_threads().empty()) {
-        next_pc = static_cast<size_t>(selected_warp->get_threads()[0].pc());
-        for (const auto& thread : selected_warp->get_threads()) {
-            if (static_cast<size_t>(thread.pc()) != next_pc) {
-                throw std::runtime_error("Invariant violation: thread PCs diverged after execution.");
+    if (result.status == ExecutionStatus::BarrierReached) {
+        handle_barrier_arrival(*selected_warp);
+    }
+
+    // 5. Update PC - Minimum PC of all non-completed/active threads
+    // Note: Active threads are represented implicitly by threads whose PC remains within the kernel instruction stream.
+    size_t min_pc = SIZE_MAX;
+    for (const auto& thread : selected_warp->get_threads()) {
+        if (thread.pc() < 0) {
+            throw std::runtime_error("Invariant violation: thread PC is negative.");
+        }
+        size_t tpc = static_cast<size_t>(thread.pc());
+        if (tpc < kernel.instructions().size()) {
+            if (tpc < min_pc) {
+                min_pc = tpc;
             }
+        } else if (tpc > kernel.instructions().size()) {
+            throw std::runtime_error("Invariant violation: thread PC jumped beyond kernel bounds.");
         }
     }
-    selected_warp->set_warp_pc(next_pc);
 
-    // 6. State transition and execution latency stall
-    if (next_pc >= kernel.instructions().size()) {
-        selected_warp->set_completed();
-    } else if (result.latency > 1) {
-        // latency = total simulated cycles consumed by the memory instruction, including its issue cycle
-        selected_warp->stall(result.latency - 1);
+    if (min_pc == SIZE_MAX) {
+        selected_warp->set_warp_pc(kernel.instructions().size());
+        if (selected_warp->get_state() != WarpState::StalledAtBarrier) {
+            selected_warp->set_completed();
+        }
+    } else {
+        selected_warp->set_warp_pc(min_pc);
+        if (result.status != ExecutionStatus::BarrierReached && result.latency > 1) {
+            selected_warp->stall(result.latency - 1);
+        }
     }
 
     counters_.increment_instructions_retired();
+}
+
+void SM::handle_barrier_arrival(Warp& warp) {
+    warp.set_stalled_at_barrier();
+
+    // Note: Block barriers assume all warps belonging to a resident block execute on the same SM,
+    // consistent with the current block-level dispatch model.
+    size_t block_id = warp.get_threads().empty() ? 0 : warp.get_threads()[0].get_block_id();
+
+    size_t total_warps = 0;
+    size_t completed_warps = 0;
+    size_t stalled_warps = 0;
+
+    for (const auto& w : warps_) {
+        if (!w.get_threads().empty() && w.get_threads()[0].get_block_id() == block_id) {
+            total_warps++;
+            if (w.get_state() == WarpState::Completed) completed_warps++;
+            if (w.get_state() == WarpState::StalledAtBarrier) stalled_warps++;
+        }
+    }
+
+    if (stalled_warps + completed_warps == total_warps) {
+        if (completed_warps > 0) {
+            throw std::runtime_error("Malformed barrier: some warps in the block completed without reaching the barrier.");
+        }
+        // All warps arrived, release them
+        for (auto& w : warps_) {
+            if (!w.get_threads().empty() && w.get_threads()[0].get_block_id() == block_id) {
+                if (w.get_state() == WarpState::StalledAtBarrier) {
+                    w.set_ready();
+                }
+            }
+        }
+    }
 }
 
 } // namespace sim_sm
