@@ -64,4 +64,12 @@ void Warp::set_ready() {
     state_ = WarpState::Ready;
 }
 
+int Warp::get_priority() const {
+    return priority_;
+}
+
+void Warp::set_priority(int priority) {
+    priority_ = priority;
+}
+
 } // namespace sim_sm

@@ -5,6 +5,7 @@
 #include "architecture/occupancy.hpp"
 #include "scheduling/round_robin_scheduler.hpp"
 #include "scheduling/greedy_scheduler.hpp"
+#include "scheduling/priority_scheduler.hpp"
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -50,6 +51,7 @@ sim_sm::Grid build_benchmark_grid(size_t num_threads, size_t block_size, size_t 
 
                 warp.add_thread(thread);
             }
+            warp.set_priority(static_cast<int>(warp.get_warp_id()));
             block.add_warp(warp);
         }
         grid.add_block(block);
@@ -70,6 +72,8 @@ void run_experiment(const std::string& name, const SystemConfig& config,
     for (auto& sm : gpu.get_sms()) {
         if (scheduler_type == "greedy") {
             sm.set_scheduler(std::make_unique<sim_sm::GreedyScheduler>());
+        } else if (scheduler_type == "priority") {
+            sm.set_scheduler(std::make_unique<sim_sm::PriorityScheduler>());
         } else {
             sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
         }
@@ -435,8 +439,9 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type) {
     bool run_all = (b_type == "all");
     bool run_gemm = run_all || (b_type == "matrix_multiply");
     bool run_basic = run_all || (b_type == "basic");
+    bool run_priority = run_all || (b_type == "priority");
 
-    if (!run_all && !run_gemm && !run_basic) {
+    if (!run_all && !run_gemm && !run_basic && !run_priority) {
         throw std::runtime_error("Unknown benchmark: " + b_type);
     }
 
@@ -446,9 +451,17 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type) {
         run_gemm_benchmark("matrix_multiply_32x32_tile16", gemm_config, 32, 32, 32, 16);
     }
 
+    if (run_priority) {
+        run_experiment("scheduler_priority", base_config, "priority", false);
+    }
+
     if (run_basic) {
         run_experiment("scheduler_rr", base_config, "rr", false);
         run_experiment("scheduler_greedy", base_config, "greedy", false);
+        // By user request, scheduler_priority.csv is generated alongside basic so it's comparable
+        if (!run_priority) {
+            run_experiment("scheduler_priority", base_config, "priority", false);
+        }
         run_cache_experiment("cache_small", base_config, 2, 2);
         run_cache_experiment("cache_large", base_config, 16, 4);
         run_experiment("coalesced", base_config, "rr", false);

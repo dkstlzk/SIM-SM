@@ -1,0 +1,2 @@
+Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM
+scheduler_priority,4,39946,25600,0.64,19200,93568,1.00,16

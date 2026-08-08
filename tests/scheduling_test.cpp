@@ -4,6 +4,7 @@
 #include "architecture/kernel.hpp"
 #include "scheduling/greedy_scheduler.hpp"
 #include "scheduling/round_robin_scheduler.hpp"
+#include "scheduling/priority_scheduler.hpp"
 #include "memory/memory_system.hpp"
 #include "memory/cache.hpp"
 #include "memory/shared_memory.hpp"
@@ -177,4 +178,121 @@ TEST_F(SchedulingTest, SMExecutionIntegration) {
 
     double greedy_ipc = sm_greedy.get_counters().get_ipc();
     EXPECT_GT(greedy_ipc, 0.0);
+}
+
+TEST_F(SchedulingTest, PrioritySchedulerUnit) {
+    std::vector<Warp> warps;
+    warps.emplace_back(0);
+    warps.emplace_back(1);
+    warps.emplace_back(2);
+
+    warps[0].set_priority(5);
+    warps[1].set_priority(20);
+    warps[2].set_priority(10);
+
+    PriorityScheduler scheduler;
+
+    // Highest priority is warp 1 (prio 20)
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
+
+    // Stall warp 1, next highest is warp 2 (prio 10)
+    warps[1].stall(5);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
+
+    // Stall warp 2, next is warp 0 (prio 5)
+    warps[2].stall(5);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0);
+}
+
+TEST_F(SchedulingTest, PrioritySchedulerTieBreaker) {
+    std::vector<Warp> warps;
+    warps.emplace_back(0);
+    warps.emplace_back(1);
+    warps.emplace_back(2);
+    warps.emplace_back(3);
+
+    warps[0].set_priority(10);
+    warps[1].set_priority(20);
+    warps[2].set_priority(20);
+    warps[3].set_priority(5);
+
+    PriorityScheduler scheduler;
+
+    // Priority 20 candidates: warp 1 and 2
+    // RR tiebreaker should pick warp 1 first
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
+
+    // Next call should pick warp 2 (RR tiebreaker advances)
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
+
+    // Next call should pick warp 1 again
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
+
+    // Now if warp 0 is ready (prio 10), but warp 2 is still prio 20 and ready
+    // It must pick warp 2
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
+}
+
+TEST_F(SchedulingTest, PrioritySchedulerSkipsStalledHighPriorityWarp) {
+    std::vector<Warp> warps;
+    warps.emplace_back(0);
+    warps.emplace_back(1);
+    warps.emplace_back(2);
+
+    warps[0].set_priority(100);
+    warps[1].set_priority(50);
+    warps[2].set_priority(10);
+
+    // Warp 0 is Stalled
+    warps[0].stall(5);
+    // Warps 1 and 2 are Ready
+
+    PriorityScheduler scheduler;
+
+    // Must pick warp 1 because warp 0 is stalled
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
+}
+
+TEST_F(SchedulingTest, SMExecutionPriority) {
+    std::vector<Instruction> insts = {
+        {Opcode::ADD, 0, 1, 2, 0},
+        {Opcode::ADD, 1, 2, 3, 0},
+        {Opcode::ADD, 2, 3, 4, 0}
+    };
+    Kernel kernel("priority_test", insts);
+    auto memory = create_memory_system();
+
+    SM sm_priority(0);
+    setup_sm(sm_priority, 2);
+    auto& p_warps = const_cast<std::vector<Warp>&>(sm_priority.get_warps());
+    p_warps[0].set_priority(10);
+    p_warps[1].set_priority(20);
+    sm_priority.set_scheduler(std::make_unique<PriorityScheduler>());
+
+    SM sm_rr(1);
+    setup_sm(sm_rr, 2);
+    sm_rr.set_scheduler(std::make_unique<RoundRobinScheduler>());
+
+    std::vector<size_t> priority_trace;
+    while (!sm_priority.is_completed()) {
+        std::vector<size_t> prev_pcs = {p_warps[0].get_warp_pc(), p_warps[1].get_warp_pc()};
+        sm_priority.tick(kernel, *memory);
+        if (p_warps[0].get_warp_pc() > prev_pcs[0]) priority_trace.push_back(0);
+        else if (p_warps[1].get_warp_pc() > prev_pcs[1]) priority_trace.push_back(1);
+    }
+
+    auto& rr_warps = const_cast<std::vector<Warp>&>(sm_rr.get_warps());
+    std::vector<size_t> rr_trace;
+    while (!sm_rr.is_completed()) {
+        std::vector<size_t> prev_pcs = {rr_warps[0].get_warp_pc(), rr_warps[1].get_warp_pc()};
+        sm_rr.tick(kernel, *memory);
+        if (rr_warps[0].get_warp_pc() > prev_pcs[0]) rr_trace.push_back(0);
+        else if (rr_warps[1].get_warp_pc() > prev_pcs[1]) rr_trace.push_back(1);
+    }
+
+    std::vector<size_t> expected_priority_trace = {1, 1, 1, 0, 0, 0};
+    EXPECT_EQ(priority_trace, expected_priority_trace);
+
+    std::vector<size_t> expected_rr_trace = {0, 1, 0, 1, 0, 1};
+    EXPECT_EQ(rr_trace, expected_rr_trace);
 }

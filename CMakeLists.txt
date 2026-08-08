@@ -24,6 +24,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+
 set(ARCHITECTURE_SOURCES
     src/architecture/gpu.cpp
     src/architecture/sm.cpp
@@ -51,6 +52,7 @@ set(EXECUTION_SOURCES
 set(SCHEDULING_SOURCES
     src/scheduling/greedy_scheduler.cpp
     src/scheduling/round_robin_scheduler.cpp
+    src/scheduling/priority_scheduler.cpp
 )
 
 set(RUNTIME_SOURCES
