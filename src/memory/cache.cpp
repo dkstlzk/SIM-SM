@@ -6,11 +6,11 @@ namespace sim_sm {
 
 Cache::Cache(size_t num_sets, size_t associativity, size_t line_size, const std::string& policy_name)
     : num_sets_(num_sets), associativity_(associativity), line_size_(line_size) {
-    
+
     if (num_sets_ == 0 || associativity_ == 0 || line_size_ == 0) {
         throw std::invalid_argument("Cache dimensions must be strictly positive.");
     }
-    
+
     sets_.resize(num_sets_);
     for (auto& set : sets_) {
         set.resize(associativity_);
@@ -52,7 +52,7 @@ bool Cache::access(size_t address) {
     if (set[victim_way].valid) {
         stats_.evictions++;
     }
-    
+
     set[victim_way].valid = true;
     set[victim_way].tag = tag;
     policy->on_access(victim_way);

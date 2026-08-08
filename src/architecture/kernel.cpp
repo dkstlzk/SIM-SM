@@ -3,7 +3,7 @@
 
 namespace sim_sm {
 
-Kernel::Kernel(std::string name, std::vector<Instruction> instructions) 
+Kernel::Kernel(std::string name, std::vector<Instruction> instructions)
     : name_(std::move(name))
     , instructions_(std::move(instructions)) {}
 

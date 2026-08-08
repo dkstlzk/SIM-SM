@@ -1,0 +1,2 @@
+Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM
+matrix_multiply_32x32_tile16,4,21568,21568,1.00,2336,70272,1.00,8

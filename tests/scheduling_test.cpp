@@ -56,18 +56,18 @@ TEST_F(SchedulingTest, GreedySchedulerUnit) {
     warps.emplace_back(2);
 
     GreedyScheduler scheduler;
-    
+
     // First ready should be 0
     EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0);
-    
+
     // Stall warp 0
     warps[0].stall(5);
     EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
-    
+
     // Stall warp 1
     warps[1].stall(5);
     EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
-    
+
     // Stall warp 2
     warps[2].stall(5);
     EXPECT_EQ(scheduler.select_warp(warps), nullptr);
@@ -79,7 +79,7 @@ TEST_F(SchedulingTest, RoundRobinSchedulerUnit) {
     warps.emplace_back(1);
     warps.emplace_back(2);
     RoundRobinScheduler scheduler;
-    
+
     // Initially next is 0
     Warp* selected = scheduler.select_warp(warps);
     ASSERT_NE(selected, nullptr);
@@ -99,10 +99,10 @@ TEST_F(SchedulingTest, RoundRobinSchedulerUnit) {
     selected = scheduler.select_warp(warps);
     ASSERT_NE(selected, nullptr);
     EXPECT_EQ(selected->get_warp_id(), 0);
-    
+
     // Stall warp 1
     warps[1].stall(5);
-    
+
     // Next should skip 1 and select 2
     EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
 }
@@ -110,7 +110,7 @@ TEST_F(SchedulingTest, RoundRobinSchedulerUnit) {
 TEST_F(SchedulingTest, FinalInstructionCompletesWarp) {
     SM sm(0);
     sm.set_scheduler(std::make_unique<GreedyScheduler>());
-    
+
     Warp warp(0);
     for (int i = 0; i < 32; ++i) {
         warp.add_thread(Thread(i, i, 0, 0, 0));
@@ -122,7 +122,7 @@ TEST_F(SchedulingTest, FinalInstructionCompletesWarp) {
         {Opcode::LOAD, 1, 0, 0, 10}
     };
     Kernel kernel("single_load", insts);
-    
+
     auto memory = create_memory_system();
 
     while (!sm.is_completed()) {
@@ -170,11 +170,11 @@ TEST_F(SchedulingTest, SMExecutionIntegration) {
     // Latencies: MOV(1), LOAD(5 -> stall 4), ADD(1), MUL(1), STORE(5 -> stall 4).
     EXPECT_EQ(greedy_cycles, 11);
     EXPECT_EQ(rr_cycles, 12);
-    
+
     // Verify IPC calculation
     double rr_ipc = sm_rr.get_counters().get_ipc();
     EXPECT_GT(rr_ipc, 0.0);
-    
+
     double greedy_ipc = sm_greedy.get_counters().get_ipc();
     EXPECT_GT(greedy_ipc, 0.0);
 }

@@ -1,6 +1,7 @@
 #include "memory/memory_system.hpp"
 #include "memory/memory_coalescer.hpp"
 #include <algorithm>
+#include <stdexcept>
 
 namespace sim_sm {
 
@@ -20,6 +21,9 @@ size_t MemorySystem::access_latency(size_t address) {
 }
 
 size_t MemorySystem::load(size_t address, int& out_value) {
+    if (address >= SHARED_MEM_BASE) {
+        return shared_load(address - SHARED_MEM_BASE, out_value);
+    }
     // Global memory access
     size_t latency = access_latency(address);
     out_value = global_memory_.load(address);
@@ -27,6 +31,9 @@ size_t MemorySystem::load(size_t address, int& out_value) {
 }
 
 size_t MemorySystem::store(size_t address, int value) {
+    if (address >= SHARED_MEM_BASE) {
+        return shared_store(address - SHARED_MEM_BASE, value);
+    }
     // Global memory access
     size_t latency = access_latency(address);
     global_memory_.store(address, value);
@@ -35,6 +42,26 @@ size_t MemorySystem::store(size_t address, int value) {
 
 WarpMemoryResult MemorySystem::warp_load(const std::vector<size_t>& addresses, std::vector<int>& out_values) {
     out_values.resize(addresses.size());
+    if (addresses.empty()) return {0, 0};
+
+    bool is_shared = (addresses[0] >= SHARED_MEM_BASE);
+    for (size_t addr : addresses) {
+        if ((addr >= SHARED_MEM_BASE) != is_shared) {
+            throw std::runtime_error("Mixed shared/global address spaces within one warp memory instruction");
+        }
+    }
+
+    if (is_shared) {
+        size_t max_latency = 0;
+        for (size_t i = 0; i < addresses.size(); ++i) {
+            size_t local_addr = addresses[i] - SHARED_MEM_BASE;
+            int val;
+            size_t lat = shared_load(local_addr, val);
+            out_values[i] = val;
+            max_latency = std::max(max_latency, lat);
+        }
+        return {max_latency, addresses.size()}; // N transactions for shared memory bank accesses
+    }
 
     // Coalesce addresses into cache line transactions
     std::vector<size_t> transactions = MemoryCoalescer::coalesce(addresses, get_l1_line_size());
@@ -57,6 +84,25 @@ WarpMemoryResult MemorySystem::warp_load(const std::vector<size_t>& addresses, s
 }
 
 WarpMemoryResult MemorySystem::warp_store(const std::vector<size_t>& addresses, const std::vector<int>& values) {
+    if (addresses.empty()) return {0, 0};
+
+    bool is_shared = (addresses[0] >= SHARED_MEM_BASE);
+    for (size_t addr : addresses) {
+        if ((addr >= SHARED_MEM_BASE) != is_shared) {
+            throw std::runtime_error("Mixed shared/global address spaces within one warp memory instruction");
+        }
+    }
+
+    if (is_shared) {
+        size_t max_latency = 0;
+        for (size_t i = 0; i < addresses.size(); ++i) {
+            size_t local_addr = addresses[i] - SHARED_MEM_BASE;
+            size_t lat = shared_store(local_addr, values[i]);
+            max_latency = std::max(max_latency, lat);
+        }
+        return {max_latency, addresses.size()};
+    }
+
     // Coalesce addresses into cache line transactions
     std::vector<size_t> transactions = MemoryCoalescer::coalesce(addresses, get_l1_line_size());
 

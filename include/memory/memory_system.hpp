@@ -21,6 +21,8 @@ struct WarpMemoryResult {
 
 class MemorySystem {
 public:
+    static constexpr size_t SHARED_MEM_BASE = 0x10000000;
+
     MemorySystem(SharedMemory& shared_memory, Cache& l1_cache, Cache& l2_cache, GlobalMemory& global_memory, const MemoryAccessConfig& config = {})
         : shared_memory_(shared_memory), l1_cache_(l1_cache), l2_cache_(l2_cache), global_memory_(global_memory), config_(config) {}
 

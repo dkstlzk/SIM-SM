@@ -26,7 +26,7 @@ TEST(MemoryTest, CacheHitsAndMisses) {
     // Address 0 -> Line 0 -> Set 0 (Hit)
     EXPECT_TRUE(cache.access(0));
     EXPECT_EQ(cache.stats().hits, 1);
-    
+
     // Address 4 -> Line 1 -> Set 1 (Hit)
     EXPECT_TRUE(cache.access(4));
     EXPECT_EQ(cache.stats().hits, 2);
@@ -55,7 +55,7 @@ TEST(MemoryTest, LRUEviction) {
 
     // Verify Line 0 is still there (since it was MRU before 8 was accessed)
     EXPECT_TRUE(cache.access(0));  // Line 0 (Tag 0), Hit
-    
+
     // Now LRU is Line 2 (Tag 2). Line 0 is MRU.
     // Verify Line 1 was evicted earlier by accessing it and expecting a miss.
     EXPECT_FALSE(cache.access(4)); // Line 1 (Tag 1), Miss + Eviction (evicts Line 2)
@@ -67,13 +67,13 @@ TEST(MemoryTest, MemorySystemAMATAndLatency) {
     Cache l1(1, 2, 4); // L1: 1 set, 2 ways, 4 bytes/line
     Cache l2(1, 4, 4); // L2: 1 set, 4 ways, 4 bytes/line
     GlobalMemory global(1000000);
-    
+
     MemoryAccessConfig config;
     config.shared_memory_latency = 1;
     config.l1_latency = 5;
     config.l2_latency = 20;
     config.global_memory_latency = 100;
-    
+
     MemorySystem mem(shared, l1, l2, global, config);
 
     int val;
@@ -82,11 +82,11 @@ TEST(MemoryTest, MemorySystemAMATAndLatency) {
     EXPECT_EQ(mem.shared_load(100, val), config.shared_memory_latency);
     EXPECT_EQ(val, 42);
 
-    // Global Memory Access 
+    // Global Memory Access
     // Access 0 (Miss L1, Miss L2)
     size_t expected_miss_latency = config.l1_latency + config.l2_latency + config.global_memory_latency; // 125
     EXPECT_EQ(mem.store(0, 84), expected_miss_latency);
-    
+
     // Access 0 (Hit L1)
     EXPECT_EQ(mem.load(0, val), config.l1_latency); // 5
     EXPECT_EQ(val, 84);
@@ -96,7 +96,7 @@ TEST(MemoryTest, MemorySystemAMATAndLatency) {
 
     // Access 4 (Different line, Miss L1, Miss L2)
     EXPECT_EQ(mem.load(4, val), expected_miss_latency); // 125
-    
+
     // Calculate AMAT
     // Accesses to L1:
     // store(0) -> miss
@@ -104,7 +104,7 @@ TEST(MemoryTest, MemorySystemAMATAndLatency) {
     // load(1) -> hit
     // load(4) -> miss
     // Total L1 accesses = 4 (2 hits, 2 misses). L1 miss rate = 0.5
-    
+
     // Accesses to L2:
     // store(0) -> miss
     // load(4) -> miss
@@ -118,7 +118,7 @@ TEST(MemoryTest, MemorySystemAMATAndLatency) {
     //      = 5 + (0.5 * 120) = 5 + 60 = 65
 
     EXPECT_DOUBLE_EQ(mem.compute_amat(), 65.0);
-    
+
     // Now let's hit L2 but miss L1
     // Evict 0 from L1 by accessing 8 (associativity is 2)
     // Currently L1 has 0 and 4.
@@ -146,6 +146,70 @@ TEST(MemoryTest, MemorySystemAMATAndLatency) {
     // AMAT = 5 + (2/3 * 95) = 5 + 63.333333333333336 = 68.333333333333336
 
     EXPECT_DOUBLE_EQ(mem.compute_amat(), 5.0 + (2.0 / 3.0) * 95.0);
+}
+
+TEST(MemoryTest, SharedMemoryRouting) {
+    SharedMemory shared(65536);
+    Cache l1(1, 2, 4);
+    Cache l2(1, 4, 4);
+    GlobalMemory global(1000000);
+
+    MemoryAccessConfig config;
+    config.shared_memory_latency = 1;
+    config.l1_latency = 5;
+    config.l2_latency = 20;
+    config.global_memory_latency = 100;
+
+    MemorySystem mem(shared, l1, l2, global, config);
+
+    int val = 0;
+    // Store using shared memory base address
+    size_t store_lat = mem.store(MemorySystem::SHARED_MEM_BASE + 0x10, 42);
+    EXPECT_EQ(store_lat, config.shared_memory_latency);
+
+    size_t load_lat = mem.load(MemorySystem::SHARED_MEM_BASE + 0x10, val);
+    EXPECT_EQ(load_lat, config.shared_memory_latency);
+    EXPECT_EQ(val, 42);
+
+    // Verify it didn't go to global memory
+    EXPECT_EQ(global.load(0x10), 0);
+
+    // Test warp access routing
+    std::vector<size_t> addresses = {
+        MemorySystem::SHARED_MEM_BASE + 0x20,
+        MemorySystem::SHARED_MEM_BASE + 0x24
+    };
+    std::vector<int> values = { 10, 20 };
+    auto res_store = mem.warp_store(addresses, values);
+    EXPECT_EQ(res_store.total_latency, config.shared_memory_latency);
+
+    std::vector<int> out_values;
+    auto res_load = mem.warp_load(addresses, out_values);
+    EXPECT_EQ(res_load.total_latency, config.shared_memory_latency);
+    EXPECT_EQ(out_values[0], 10);
+    EXPECT_EQ(out_values[1], 20);
+
+    // Verify it didn't hit global memory
+    EXPECT_EQ(global.load(0x20), 0);
+}
+
+TEST(MemoryTest, MixedAddressSpaceRejection) {
+    SharedMemory shared(65536);
+    Cache l1(1, 2, 4);
+    Cache l2(1, 4, 4);
+    GlobalMemory global(1000000);
+    MemoryAccessConfig config;
+    MemorySystem mem(shared, l1, l2, global, config);
+
+    std::vector<size_t> mixed_addresses = {
+        MemorySystem::SHARED_MEM_BASE + 0x20,
+        0x100 // Global memory address
+    };
+    std::vector<int> values = { 10, 20 };
+    std::vector<int> out_values;
+
+    EXPECT_THROW(mem.warp_load(mixed_addresses, out_values), std::runtime_error);
+    EXPECT_THROW(mem.warp_store(mixed_addresses, values), std::runtime_error);
 }
 
 } // namespace sim_sm

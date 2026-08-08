@@ -39,7 +39,7 @@ void GPU::run_to_completion(const Kernel& kernel) {
     bool all_done = false;
     while (!all_done) {
         all_done = true;
-        
+
         // Phase 1: Load new blocks into empty SMs
         for (auto& sm : sms_) {
             if (sm.is_completed()) {
@@ -57,7 +57,7 @@ void GPU::run_to_completion(const Kernel& kernel) {
                 }
             }
         }
-        
+
         // Phase 2: Tick active SMs
         for (auto& sm : sms_) {
             if (!sm.is_completed()) {

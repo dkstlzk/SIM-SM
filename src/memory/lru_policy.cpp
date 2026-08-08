@@ -16,7 +16,7 @@ size_t LRUPolicy::choose_victim(const std::vector<CacheLine>& lines) {
     if (lru_list_.empty()) {
         throw std::runtime_error("LRU list is empty");
     }
-    
+
     // Check for an invalid line first to fill before evicting valid data
     for (size_t i = 0; i < lines.size(); ++i) {
         if (!lines[i].valid) {

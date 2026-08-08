@@ -272,6 +272,53 @@ TEST(SMTest, BarrierMultiWarpSameBlock) {
     EXPECT_EQ(sm.get_warps()[1].get_state(), sim_sm::WarpState::Completed);
 }
 
+TEST(SMTest, BarrierMultiRoundTrip) {
+    sim_sm::SM sm(0);
+    sm.set_scheduler(std::make_unique<sim_sm::GreedyScheduler>());
+
+    sim_sm::Warp w0(0);
+    for (int i = 0; i < 32; ++i) w0.add_thread(sim_sm::Thread(i, 0, i, 0, i));
+    sim_sm::Warp w1(1);
+    for (int i = 0; i < 32; ++i) w1.add_thread(sim_sm::Thread(32+i, 0, 32+i, 1, i)); // Same block 0
+    sm.add_warp(w0);
+    sm.add_warp(w1);
+
+    sim_sm::GlobalMemory gm(1024);
+    sim_sm::MemorySystem mem(sm.get_shared_memory(), sm.get_l1_cache(), sm.get_l1_cache(), gm);
+
+    std::vector<sim_sm::Instruction> insts = {
+        {sim_sm::Opcode::ADD, 0, 0, 0, 0},
+        {sim_sm::Opcode::BARRIER, 0, 0, 0, 0},
+        {sim_sm::Opcode::ADD, 0, 0, 0, 0},
+        {sim_sm::Opcode::BARRIER, 0, 0, 0, 0},
+        {sim_sm::Opcode::ADD, 0, 0, 0, 0}
+    };
+    sim_sm::Kernel kernel("multi_barrier", insts);
+
+    sm.tick(kernel, mem); // w0 ADD
+    sm.tick(kernel, mem); // w0 BARRIER
+    EXPECT_EQ(sm.get_warps()[0].get_state(), sim_sm::WarpState::StalledAtBarrier);
+
+    sm.tick(kernel, mem); // w1 ADD
+    sm.tick(kernel, mem); // w1 BARRIER, releases both
+    EXPECT_EQ(sm.get_warps()[0].get_state(), sim_sm::WarpState::Ready);
+    EXPECT_EQ(sm.get_warps()[1].get_state(), sim_sm::WarpState::Ready);
+
+    sm.tick(kernel, mem); // w0 ADD
+    sm.tick(kernel, mem); // w0 BARRIER
+    EXPECT_EQ(sm.get_warps()[0].get_state(), sim_sm::WarpState::StalledAtBarrier);
+
+    sm.tick(kernel, mem); // w1 ADD
+    sm.tick(kernel, mem); // w1 BARRIER, releases both
+    EXPECT_EQ(sm.get_warps()[0].get_state(), sim_sm::WarpState::Ready);
+    EXPECT_EQ(sm.get_warps()[1].get_state(), sim_sm::WarpState::Ready);
+
+    sm.tick(kernel, mem); // w0 ADD, Completes
+    EXPECT_EQ(sm.get_warps()[0].get_state(), sim_sm::WarpState::Completed);
+    sm.tick(kernel, mem); // w1 ADD, Completes
+    EXPECT_EQ(sm.get_warps()[1].get_state(), sim_sm::WarpState::Completed);
+}
+
 TEST(SMTest, BarrierDifferentBlocksIndependent) {
     sim_sm::SM sm(0);
     sm.set_scheduler(std::make_unique<sim_sm::GreedyScheduler>());
