@@ -17,7 +17,7 @@ namespace sim_sm {
 
 class SM {
 public:
-    SM(size_t sm_id, size_t l1_sets = 4, size_t l1_assoc = 4, size_t l1_line_size = 32);
+    SM(size_t sm_id, size_t l1_sets = 4, size_t l1_assoc = 4, size_t l1_line_size = 32, const std::string& cache_policy = "LRU");
 
     size_t get_sm_id() const;
 

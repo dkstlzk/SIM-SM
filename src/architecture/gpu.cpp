@@ -7,10 +7,10 @@
 
 namespace sim_sm {
 
-GPU::GPU(size_t num_sms, size_t l1_sets, size_t l1_assoc, size_t l2_sets, size_t l2_assoc, size_t l2_line_size, size_t global_mem_size)
-    : l2_cache_(l2_sets, l2_assoc, l2_line_size, "LRU"), global_memory_(global_mem_size) {
+GPU::GPU(size_t num_sms, size_t l1_sets, size_t l1_assoc, size_t l2_sets, size_t l2_assoc, size_t l2_line_size, size_t global_mem_size, const std::string& cache_policy)
+    : l2_cache_(l2_sets, l2_assoc, l2_line_size, cache_policy), global_memory_(global_mem_size) {
     for (size_t i = 0; i < num_sms; ++i) {
-        sms_.emplace_back(i, l1_sets, l1_assoc, 32);
+        sms_.emplace_back(i, l1_sets, l1_assoc, 32, cache_policy);
     }
 }
 

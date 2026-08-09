@@ -117,13 +117,18 @@ void run_experiment(const std::string& name, const SystemConfig& config,
     out.close();
 }
 
-void run_cache_experiment(const std::string& name, const SystemConfig& config, size_t l1_sets, size_t l1_assoc) {
+void run_cache_experiment(const std::string& name, const SystemConfig& config, size_t l1_sets, size_t l1_assoc, const std::string& policy) {
     std::filesystem::create_directories("results");
-    std::ofstream out("results/" + name + ".csv");
-    out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM\n";
+    // We want to append if the file exists, or create if it doesn't.
+    // If it's the first time, write header. We can just use ios::app.
+    bool file_exists = std::filesystem::exists("results/" + name + ".csv");
+    std::ofstream out("results/" + name + ".csv", std::ios::app);
+    if (!file_exists) {
+        out << "Experiment,SMs,Policy,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM\n";
+    }
 
     // 1 SM to isolate cache behavior without inter-SM interference
-    sim_sm::GPU gpu(1, l1_sets, l1_assoc, 16, 8, 32, 1048576);
+    sim_sm::GPU gpu(1, l1_sets, l1_assoc, 16, 8, 32, 1048576, policy);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
     }
@@ -162,7 +167,7 @@ void run_cache_experiment(const std::string& name, const SystemConfig& config, s
 
     double ipc = (total_cycles > 0) ? (double)total_insts / total_cycles : 0.0;
 
-    out << name << "," << 1 << "," << total_cycles << ","
+    out << name << "," << 1 << "," << policy << "," << total_cycles << ","
         << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
         << total_mem_insts << "," << total_mem_txns << ","
         << occ.occupancy_percentage << "," << occ.resident_blocks << "\n";
@@ -462,8 +467,17 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type) {
         if (!run_priority) {
             run_experiment("scheduler_priority", base_config, "priority", false);
         }
-        run_cache_experiment("cache_small", base_config, 2, 2);
-        run_cache_experiment("cache_large", base_config, 16, 4);
+        
+        // Remove previous cache sweep results to avoid appending to old runs
+        std::filesystem::remove("results/cache_small.csv");
+        std::filesystem::remove("results/cache_large.csv");
+
+        std::vector<std::string> policies = {"LRU", "FIFO", "Random"};
+        for (const auto& policy : policies) {
+            run_cache_experiment("cache_small", base_config, 2, 2, policy);
+            run_cache_experiment("cache_large", base_config, 16, 4, policy);
+        }
+        
         run_experiment("coalesced", base_config, "rr", false);
         run_experiment("strided", base_config, "rr", true);
 

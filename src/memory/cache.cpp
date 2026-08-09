@@ -1,5 +1,7 @@
 #include "memory/cache.hpp"
 #include "memory/lru_policy.hpp"
+#include "memory/fifo_policy.hpp"
+#include "memory/random_policy.hpp"
 #include <stdexcept>
 
 namespace sim_sm {
@@ -19,6 +21,10 @@ Cache::Cache(size_t num_sets, size_t associativity, size_t line_size, const std:
     for (size_t i = 0; i < num_sets_; ++i) {
         if (policy_name == "LRU") {
             policies_.push_back(std::make_unique<LRUPolicy>(associativity_));
+        } else if (policy_name == "FIFO") {
+            policies_.push_back(std::make_unique<FIFOPolicy>(associativity_));
+        } else if (policy_name == "Random") {
+            policies_.push_back(std::make_unique<RandomPolicy>(42));
         } else {
             throw std::invalid_argument("Unsupported replacement policy: " + policy_name);
         }

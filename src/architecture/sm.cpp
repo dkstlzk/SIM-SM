@@ -4,8 +4,8 @@
 
 namespace sim_sm {
 
-SM::SM(size_t sm_id, size_t l1_sets, size_t l1_assoc, size_t l1_line_size)
-    : sm_id_(sm_id), l1_cache_(l1_sets, l1_assoc, l1_line_size, "LRU"), shared_memory_(65536) {}
+SM::SM(size_t sm_id, size_t l1_sets, size_t l1_assoc, size_t l1_line_size, const std::string& cache_policy)
+    : sm_id_(sm_id), l1_cache_(l1_sets, l1_assoc, l1_line_size, cache_policy), shared_memory_(65536) {}
 
 size_t SM::get_sm_id() const {
     return sm_id_;

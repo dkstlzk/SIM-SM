@@ -212,4 +212,62 @@ TEST(MemoryTest, MixedAddressSpaceRejection) {
     EXPECT_THROW(mem.warp_store(mixed_addresses, values), std::runtime_error);
 }
 
+TEST(MemoryTest, FIFOPolicyEviction) {
+    Cache cache(1, 2, 4, "FIFO");
+
+    // Load A (Line 0) and B (Line 1)
+    EXPECT_FALSE(cache.access(0)); // A - miss
+    EXPECT_FALSE(cache.access(4)); // B - miss
+
+    // FIFO order is now A (oldest), then B (newest)
+    
+    // Access A again. In LRU this makes A the MRU. In FIFO, A is still the oldest.
+    EXPECT_TRUE(cache.access(0)); // A - hit
+
+    // Load C (Line 2). Should evict A, since it's the oldest loaded, despite being recently accessed.
+    EXPECT_FALSE(cache.access(8)); // C - miss + eviction
+    EXPECT_EQ(cache.stats().evictions, 1);
+
+    // Verify A was evicted (so accessing it misses)
+    EXPECT_FALSE(cache.access(0)); // A - miss + eviction (evicts B now)
+    EXPECT_EQ(cache.stats().evictions, 2);
+}
+
+TEST(MemoryTest, RandomPolicyDeterminism) {
+    // Two caches with same seed
+    Cache cache1(1, 4, 4, "Random");
+    Cache cache2(1, 4, 4, "Random");
+
+    // Fill the 4 ways
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_FALSE(cache1.access(i * 4));
+        EXPECT_FALSE(cache2.access(i * 4));
+    }
+
+    // Now cause 10 evictions and verify they are identical
+    for (size_t i = 4; i < 14; ++i) {
+        EXPECT_FALSE(cache1.access(i * 4));
+        EXPECT_FALSE(cache2.access(i * 4));
+        
+        // Since we can't inspect the cache ways directly, 
+        // their deterministic eviction choices imply the valid tags left inside are the same.
+        // We will just verify they both have 1 eviction per step.
+        EXPECT_EQ(cache1.stats().evictions, i - 3);
+        EXPECT_EQ(cache2.stats().evictions, i - 3);
+    }
+    
+    // Verify internal state by querying the same addresses. They should hit/miss identically.
+    for (size_t i = 0; i < 14; ++i) {
+        EXPECT_EQ(cache1.access(i * 4), cache2.access(i * 4));
+    }
+}
+
+TEST(MemoryTest, CachePolicyIntegration) {
+    // Just verifying the factory creates them without throwing
+    EXPECT_NO_THROW(Cache(1, 2, 4, "LRU"));
+    EXPECT_NO_THROW(Cache(1, 2, 4, "FIFO"));
+    EXPECT_NO_THROW(Cache(1, 2, 4, "Random"));
+    EXPECT_THROW(Cache(1, 2, 4, "UnknownPolicy"), std::invalid_argument);
+}
+
 } // namespace sim_sm

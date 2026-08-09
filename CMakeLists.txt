@@ -40,6 +40,8 @@ set(ARCHITECTURE_SOURCES
 
 set(MEMORY_SOURCES
     src/memory/lru_policy.cpp
+    src/memory/fifo_policy.cpp
+    src/memory/random_policy.cpp
     src/memory/cache.cpp
     src/memory/memory_system.cpp
     src/memory/memory_coalescer.cpp
