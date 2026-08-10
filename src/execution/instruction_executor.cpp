@@ -7,6 +7,7 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
     ExecutionStatus overall_status = ExecutionStatus::Completed;
     size_t max_latency = 1; // Default latency
     size_t memory_transactions = 0;
+    std::string memory_space = "";
 
     size_t warp_pc = warp.get_warp_pc();
 
@@ -66,6 +67,11 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
             }
 
             if (!addresses.empty()) {
+                if (addresses[0] >= MemorySystem::SHARED_MEM_BASE) {
+                    memory_space = "SHARED";
+                } else {
+                    memory_space = "GLOBAL";
+                }
                 std::vector<int> out_values;
                 WarpMemoryResult res = memory.warp_load(addresses, out_values);
                 max_latency = res.total_latency;
@@ -92,6 +98,11 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
             }
 
             if (!addresses.empty()) {
+                if (addresses[0] >= MemorySystem::SHARED_MEM_BASE) {
+                    memory_space = "SHARED";
+                } else {
+                    memory_space = "GLOBAL";
+                }
                 WarpMemoryResult res = memory.warp_store(addresses, values);
                 max_latency = res.total_latency;
                 memory_transactions = res.num_transactions;
@@ -142,7 +153,7 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
             throw std::runtime_error("Unknown opcode");
     }
 
-    return {overall_status, max_latency, memory_transactions};
+    return {overall_status, max_latency, memory_transactions, memory_space};
 }
 
 } // namespace sim_sm

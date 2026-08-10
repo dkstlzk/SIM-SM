@@ -31,7 +31,7 @@ Cache::Cache(size_t num_sets, size_t associativity, size_t line_size, const std:
     }
 }
 
-bool Cache::access(size_t address) {
+bool Cache::access(size_t address, size_t cycle) {
     stats_.accesses++;
 
     size_t line_address = address / line_size_;
@@ -46,6 +46,9 @@ bool Cache::access(size_t address) {
         if (set[way].valid && set[way].tag == tag) {
             stats_.hits++;
             policy->on_access(way);
+            if (event_cb_) {
+                event_cb_({cycle, name_, set_index, way, true});
+            }
             return true;
         }
     }
@@ -62,6 +65,10 @@ bool Cache::access(size_t address) {
     set[victim_way].valid = true;
     set[victim_way].tag = tag;
     policy->on_access(victim_way);
+    
+    if (event_cb_) {
+        event_cb_({cycle, name_, set_index, victim_way, false});
+    }
 
     return false;
 }

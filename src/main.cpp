@@ -5,6 +5,8 @@
 #include "architecture/warp.hpp"
 #include "architecture/thread.hpp"
 #include "runtime/benchmarks.hpp"
+#include "runtime/trace_logger.hpp"
+#include <memory>
 
 #include <iostream>
 #include <string>
@@ -21,29 +23,34 @@ int main(int argc, char** argv) {
     // Allow empty grid (0 threads) per requirements, but default to uninitialized (-1) to check if passed
     long long num_threads_arg = -1;
 
+    bool debug_mode = false;
+    int trace_level_val = 7; // Default to All if --debug is passed
+    std::string trace_file = "";
+
     bool run_benchmarks = false;
+    std::string b_type = "all";
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--config" && i + 1 < argc) {
             config_path = argv[++i];
         } else if (arg == "--threads" && i + 1 < argc) {
             num_threads_arg = std::stoll(argv[++i]);
+        } else if (arg == "--debug") {
+            debug_mode = true;
+        } else if (arg == "--trace-level" && i + 1 < argc) {
+            trace_level_val = std::stoi(argv[++i]);
+        } else if (arg == "--trace-file" && i + 1 < argc) {
+            trace_file = argv[++i];
         } else if (arg == "--benchmark") {
-            std::string b_type = "all";
+            run_benchmarks = true;
             if (i + 1 < argc) {
-                b_type = argv[++i];
-            }
-            if (config_path.empty()) {
-                std::cerr << "Error: --config must precede --benchmark\n";
-                return EXIT_FAILURE;
-            }
-            try {
-                sim_sm::run_benchmarks(config_path, b_type);
-                std::cout << "Benchmarks completed successfully. Results written to /results/\n";
-                return EXIT_SUCCESS;
-            } catch (const std::exception& e) {
-                std::cerr << "Benchmark error: " << e.what() << "\n";
-                return EXIT_FAILURE;
+                // Peek at the next argument. If it doesn't start with "--", it's the benchmark type
+                std::string next_arg = argv[i+1];
+                if (next_arg.substr(0, 2) != "--") {
+                    b_type = next_arg;
+                    i++;
+                }
             }
         } else {
             print_usage(argv[0]);
@@ -52,8 +59,20 @@ int main(int argc, char** argv) {
     }
 
     if (config_path.empty()) {
+        std::cerr << "Error: --config is required\n";
         print_usage(argv[0]);
         return EXIT_FAILURE;
+    }
+
+    if (run_benchmarks) {
+        try {
+            sim_sm::run_benchmarks(config_path, b_type, debug_mode, trace_level_val, trace_file);
+            std::cout << "Benchmarks completed successfully. Results written to /results/\n";
+            return EXIT_SUCCESS;
+        } catch (const std::exception& e) {
+            std::cerr << "Benchmark error: " << e.what() << "\n";
+            return EXIT_FAILURE;
+        }
     }
     if (num_threads_arg < 0) {
         print_usage(argv[0]);
@@ -66,6 +85,12 @@ int main(int argc, char** argv) {
         sim_sm::SystemConfig config = sim_sm::load_config(config_path);
 
         sim_sm::GPU gpu(config.num_sms);
+        std::unique_ptr<sim_sm::TraceLogger> logger;
+        if (debug_mode) {
+            logger = std::make_unique<sim_sm::TraceLogger>(static_cast<sim_sm::TraceLevel>(trace_level_val), trace_file);
+            gpu.set_trace_logger(logger.get());
+        }
+
         sim_sm::Grid grid;
 
         size_t block_size = config.block_size;

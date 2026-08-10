@@ -6,6 +6,7 @@
 #include "scheduling/round_robin_scheduler.hpp"
 #include "scheduling/greedy_scheduler.hpp"
 #include "scheduling/priority_scheduler.hpp"
+#include "runtime/trace_logger.hpp"
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -61,13 +62,14 @@ sim_sm::Grid build_benchmark_grid(size_t num_threads, size_t block_size, size_t 
 
 void run_experiment(const std::string& name, const SystemConfig& config,
                     const std::string& scheduler_type, bool strided,
-                    size_t l1_sets = 4, size_t l1_assoc = 4) {
+                    size_t l1_sets = 4, size_t l1_assoc = 4, sim_sm::TraceLogger* logger = nullptr) {
 
     std::filesystem::create_directories("results");
     std::ofstream out("results/" + name + ".csv");
     out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM" << "\n";
 
     sim_sm::GPU gpu(config.num_sms, l1_sets, l1_assoc, 16, 8, 32, 1048576);
+    if (logger) gpu.set_trace_logger(logger);
 
     for (auto& sm : gpu.get_sms()) {
         if (scheduler_type == "greedy") {
@@ -117,7 +119,7 @@ void run_experiment(const std::string& name, const SystemConfig& config,
     out.close();
 }
 
-void run_cache_experiment(const std::string& name, const SystemConfig& config, size_t l1_sets, size_t l1_assoc, const std::string& policy) {
+void run_cache_experiment(const std::string& name, const SystemConfig& config, size_t l1_sets, size_t l1_assoc, const std::string& policy, sim_sm::TraceLogger* logger = nullptr) {
     std::filesystem::create_directories("results");
     // We want to append if the file exists, or create if it doesn't.
     // If it's the first time, write header. We can just use ios::app.
@@ -129,6 +131,7 @@ void run_cache_experiment(const std::string& name, const SystemConfig& config, s
 
     // 1 SM to isolate cache behavior without inter-SM interference
     sim_sm::GPU gpu(1, l1_sets, l1_assoc, 16, 8, 32, 1048576, policy);
+    if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
     }
@@ -344,12 +347,13 @@ sim_sm::Grid build_gemm_grid(int M, int N, int K, int tile_size, int warp_size) 
     return grid;
 }
 
-void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int M, int N, int K, int tile_size) {
+void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int M, int N, int K, int tile_size, sim_sm::TraceLogger* logger = nullptr) {
     std::filesystem::create_directories("results");
     std::ofstream out("results/" + name + ".csv");
     out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM\n";
 
     sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 1048576);
+    if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
     }
@@ -438,8 +442,13 @@ void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int
     out.close();
 }
 
-void run_benchmarks(const std::string& config_path, const std::string& b_type) {
+void run_benchmarks(const std::string& config_path, const std::string& b_type, bool debug_mode, int trace_level_val, const std::string& trace_file) {
     SystemConfig base_config = load_config(config_path);
+
+    std::unique_ptr<sim_sm::TraceLogger> logger;
+    if (debug_mode) {
+        logger = std::make_unique<sim_sm::TraceLogger>(static_cast<sim_sm::TraceLevel>(trace_level_val), trace_file);
+    }
 
     bool run_all = (b_type == "all");
     bool run_gemm = run_all || (b_type == "matrix_multiply");
@@ -453,19 +462,19 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type) {
     if (run_gemm) {
         SystemConfig gemm_config = base_config;
         gemm_config.block_size = 256;
-        run_gemm_benchmark("matrix_multiply_32x32_tile16", gemm_config, 32, 32, 32, 16);
+        run_gemm_benchmark("matrix_multiply_32x32_tile16", gemm_config, 32, 32, 32, 16, logger.get());
     }
 
     if (run_priority) {
-        run_experiment("scheduler_priority", base_config, "priority", false);
+        run_experiment("scheduler_priority", base_config, "priority", false, 4, 4, logger.get());
     }
 
     if (run_basic) {
-        run_experiment("scheduler_rr", base_config, "rr", false);
-        run_experiment("scheduler_greedy", base_config, "greedy", false);
+        run_experiment("scheduler_rr", base_config, "rr", false, 4, 4, logger.get());
+        run_experiment("scheduler_greedy", base_config, "greedy", false, 4, 4, logger.get());
         // By user request, scheduler_priority.csv is generated alongside basic so it's comparable
         if (!run_priority) {
-            run_experiment("scheduler_priority", base_config, "priority", false);
+            run_experiment("scheduler_priority", base_config, "priority", false, 4, 4, logger.get());
         }
         
         // Remove previous cache sweep results to avoid appending to old runs
@@ -474,20 +483,20 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type) {
 
         std::vector<std::string> policies = {"LRU", "FIFO", "Random"};
         for (const auto& policy : policies) {
-            run_cache_experiment("cache_small", base_config, 2, 2, policy);
-            run_cache_experiment("cache_large", base_config, 16, 4, policy);
+            run_cache_experiment("cache_small", base_config, 2, 2, policy, logger.get());
+            run_cache_experiment("cache_large", base_config, 16, 4, policy, logger.get());
         }
         
-        run_experiment("coalesced", base_config, "rr", false);
-        run_experiment("strided", base_config, "rr", true);
+        run_experiment("coalesced", base_config, "rr", false, 4, 4, logger.get());
+        run_experiment("strided", base_config, "rr", true, 4, 4, logger.get());
 
         SystemConfig small_block = base_config;
         small_block.block_size = 64;
-        run_experiment("occupancy_64", small_block, "rr", false);
+        run_experiment("occupancy_64", small_block, "rr", false, 4, 4, logger.get());
 
         SystemConfig large_block = base_config;
         large_block.block_size = 256;
-        run_experiment("occupancy_256", large_block, "rr", false);
+        run_experiment("occupancy_256", large_block, "rr", false, 4, 4, logger.get());
     }
 }
 

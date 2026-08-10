@@ -2,8 +2,14 @@
 
 #include <cstddef>
 #include <map>
+#include <vector>
+#include <string>
 
 namespace sim_sm {
+
+class TraceLogger;
+class Warp;
+struct Instruction;
 
 enum class StallReason {
     None,
@@ -33,6 +39,11 @@ public:
     size_t get_memory_transactions() const;
     double get_transactions_per_memory_instruction() const;
 
+    // Trace hooks
+    void set_trace_logger(TraceLogger* logger);
+    void record_scheduler_event(size_t sm_id, size_t cycle, const std::string& scheduler_name, size_t selected_warp_id, const std::vector<Warp>& warps);
+    void record_memory_event(size_t sm_id, size_t cycle, size_t warp_id, const Instruction& inst, size_t transactions, const std::string& memory_space);
+
 private:
     size_t cycles_{0};
     size_t instructions_retired_{0};
@@ -40,6 +51,8 @@ private:
     std::map<StallReason, size_t> stall_reasons_;
     size_t memory_instructions_{0};
     size_t memory_transactions_{0};
+    
+    TraceLogger* trace_logger_{nullptr};
 };
 
 } // namespace sim_sm

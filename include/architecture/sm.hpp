@@ -12,8 +12,12 @@
 #include "memory/cache.hpp"
 #include "memory/memory_system.hpp"
 #include "memory/shared_memory.hpp"
+#include <string>
 
 namespace sim_sm {
+
+class WarpScheduler;
+class TraceLogger;
 
 class SM {
 public:
@@ -24,6 +28,8 @@ public:
     void add_warp(const Warp& warp);
     void set_scheduler(std::unique_ptr<WarpScheduler> scheduler);
     
+    void set_trace_logger(TraceLogger* logger);
+
     // Simulate one clock cycle
     void tick(const Kernel& kernel, MemorySystem& memory);
 

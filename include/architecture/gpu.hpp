@@ -8,9 +8,12 @@
 #include "architecture/grid.hpp"
 #include "architecture/occupancy.hpp"
 #include <vector>
+#include <string>
 #include <cstddef>
 
 namespace sim_sm {
+
+class TraceLogger;
 
 class GPU {
 public:
@@ -19,6 +22,8 @@ public:
 
     void launch_kernel(const Kernel& kernel, const Grid& grid, const SystemConfig& config, const struct KernelResourceRequirements& req);
     void run_to_completion(const Kernel& kernel);
+    
+    void set_trace_logger(TraceLogger* logger);
 
     std::vector<SM>& get_sms();
     const std::vector<SM>& get_sms() const;

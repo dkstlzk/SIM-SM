@@ -3,6 +3,7 @@
 #include "instruction/instruction.hpp"
 #include "architecture/warp.hpp"
 #include "memory/memory_system.hpp"
+#include <string>
 
 namespace sim_sm {
 
@@ -16,6 +17,7 @@ struct ExecutionResult {
     ExecutionStatus status;
     size_t latency;
     size_t memory_transactions = 0;
+    std::string memory_space = "";
 };
 
 class InstructionExecutor {

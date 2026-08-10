@@ -1,4 +1,5 @@
 #include "runtime/performance_counter.hpp"
+#include "runtime/trace_logger.hpp"
 
 namespace sim_sm {
 
@@ -59,6 +60,22 @@ size_t PerformanceCounter::get_memory_transactions() const {
 double PerformanceCounter::get_transactions_per_memory_instruction() const {
     if (memory_instructions_ == 0) return 0.0;
     return static_cast<double>(memory_transactions_) / memory_instructions_;
+}
+
+void PerformanceCounter::set_trace_logger(TraceLogger* logger) {
+    trace_logger_ = logger;
+}
+
+void PerformanceCounter::record_scheduler_event(size_t sm_id, size_t cycle, const std::string& scheduler_name, size_t selected_warp_id, const std::vector<Warp>& warps) {
+    if (trace_logger_) {
+        trace_logger_->log_scheduler_event(sm_id, cycle, scheduler_name, selected_warp_id, warps);
+    }
+}
+
+void PerformanceCounter::record_memory_event(size_t sm_id, size_t cycle, size_t warp_id, const Instruction& inst, size_t transactions, const std::string& memory_space) {
+    if (trace_logger_) {
+        trace_logger_->log_memory_event(sm_id, cycle, warp_id, inst, transactions, memory_space);
+    }
 }
 
 } // namespace sim_sm

@@ -1,5 +1,6 @@
 #include "architecture/sm.hpp"
 #include "execution/instruction_executor.hpp"
+#include "runtime/trace_logger.hpp"
 #include <stdexcept>
 
 namespace sim_sm {
@@ -17,6 +18,15 @@ void SM::add_warp(const Warp& warp) {
 
 void SM::set_scheduler(std::unique_ptr<WarpScheduler> scheduler) {
     scheduler_ = std::move(scheduler);
+}
+
+void SM::set_trace_logger(TraceLogger* logger) {
+    counters_.set_trace_logger(logger);
+    l1_cache_.set_event_callback([logger, this](const CacheEvent& e) {
+        if (logger) {
+            logger->log_cache_event(counters_.get_cycles(), "L1$" + std::to_string(sm_id_), e.set, e.way, e.hit);
+        }
+    });
 }
 
 const PerformanceCounter& SM::get_counters() const {
@@ -60,6 +70,9 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
     }
 
     Warp* selected_warp = scheduler_->select_warp(warps_);
+    
+    counters_.record_scheduler_event(sm_id_, counters_.get_cycles(), scheduler_->name(), selected_warp ? selected_warp->get_warp_id() : -1, warps_);
+
     if (!selected_warp) {
         // Differentiate stall reason: if warps exist but none ready, they are likely stalled on synthetic latency.
         if (warps_.empty()) {
@@ -86,6 +99,7 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
     if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::STORE) {
         counters_.increment_memory_instructions();
         counters_.add_memory_transactions(result.memory_transactions);
+        counters_.record_memory_event(sm_id_, counters_.get_cycles(), selected_warp->get_warp_id(), inst, result.memory_transactions, result.memory_space);
     }
 
     if (result.status == ExecutionStatus::BarrierReached) {

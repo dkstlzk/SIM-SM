@@ -7,6 +7,8 @@
 
 namespace sim_sm {
 
+class Cache;
+
 struct MemoryAccessConfig {
     size_t shared_memory_latency = 1;
     size_t l1_latency = 5;

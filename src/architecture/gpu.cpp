@@ -3,6 +3,7 @@
 #include "architecture/kernel.hpp"
 #include "architecture/occupancy.hpp"
 #include "memory/memory_system.hpp"
+#include "runtime/trace_logger.hpp"
 #include <iostream>
 
 namespace sim_sm {
@@ -75,6 +76,17 @@ std::vector<SM>& GPU::get_sms() {
 
 const std::vector<SM>& GPU::get_sms() const {
     return sms_;
+}
+
+void GPU::set_trace_logger(TraceLogger* logger) {
+    for (auto& sm : sms_) {
+        sm.set_trace_logger(logger);
+    }
+    l2_cache_.set_event_callback([logger](const CacheEvent& e) {
+        if (logger) {
+            logger->log_cache_event(e.cycle, "L2$", e.set, e.way, e.hit);
+        }
+    });
 }
 
 } // namespace sim_sm
