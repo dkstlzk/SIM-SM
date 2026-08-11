@@ -84,7 +84,7 @@ target_link_libraries(gpu-sim PRIVATE sim_sm_core)
 target_compile_options(gpu-sim PRIVATE -Wall -Wextra -Wpedantic)
 
 # Tests
-add_executable(gpu-sim-tests tests/architecture_test.cpp tests/execution_test.cpp tests/scheduling_test.cpp tests/memory_test.cpp tests/memory_coalescer_test.cpp tests/trace_test.cpp)
+add_executable(gpu-sim-tests tests/architecture_test.cpp tests/execution_test.cpp tests/scheduling_test.cpp tests/memory_test.cpp tests/memory_coalescer_test.cpp tests/trace_test.cpp tests/benchmark_test.cpp)
 target_link_libraries(gpu-sim-tests PRIVATE sim_sm_core gtest_main)
 target_compile_options(gpu-sim-tests PRIVATE -Wall -Wextra -Wpedantic)
 

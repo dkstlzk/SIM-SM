@@ -18,6 +18,7 @@ struct ExecutionResult {
     size_t latency;
     size_t memory_transactions = 0;
     std::string memory_space = "";
+    size_t write_conflict_stalls = 0;
 };
 
 class InstructionExecutor {

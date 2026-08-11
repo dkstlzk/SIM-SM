@@ -1,0 +1,3 @@
+Experiment,SMs,Pattern,Elements,Bins,TotalCycles,WriteConflictStalls,Instructions,IPC
+histogram_low_occupancy,4,uniform,32,256,1148,0,140,0.12
+histogram_low_occupancy,4,skewed,32,256,1154,7,140,0.12

@@ -123,6 +123,48 @@ WarpMemoryResult MemorySystem::warp_store(const std::vector<size_t>& addresses, 
     return {total_latency, transactions.size()};
 }
 
+WarpMemoryResult MemorySystem::warp_atomic_add(const std::vector<size_t>& addresses, const std::vector<int>& values) {
+    if (addresses.empty()) return {0, 0};
+
+    bool is_shared = (addresses[0] >= SHARED_MEM_BASE);
+    for (size_t addr : addresses) {
+        if ((addr >= SHARED_MEM_BASE) != is_shared) {
+            throw std::runtime_error("Mixed shared/global address spaces within one warp memory instruction");
+        }
+    }
+
+    if (is_shared) {
+        size_t max_latency = 0;
+        for (size_t i = 0; i < addresses.size(); ++i) {
+            size_t local_addr = addresses[i] - SHARED_MEM_BASE;
+            int current_val = shared_memory_.load(local_addr);
+            size_t lat = shared_store(local_addr, current_val + values[i]);
+            max_latency = std::max(max_latency, lat);
+        }
+        return {max_latency, addresses.size()};
+    }
+
+    // Coalesce addresses into cache line transactions
+    std::vector<size_t> transactions = MemoryCoalescer::coalesce(addresses, get_l1_line_size());
+
+    size_t max_latency = 1;
+    for (size_t line_base : transactions) {
+        size_t latency = access_latency(line_base);
+        max_latency = std::max(max_latency, latency);
+    }
+
+    // Actually atomic add the data for each thread sequentially
+    for (size_t i = 0; i < addresses.size(); ++i) {
+        int current_val = global_memory_.load(addresses[i]);
+        global_memory_.store(addresses[i], current_val + values[i]);
+    }
+
+    // Total latency: max latency + issue cost for additional transactions (issue cost = 1)
+    size_t total_latency = max_latency + (transactions.size() > 0 ? transactions.size() - 1 : 0);
+
+    return {total_latency, transactions.size()};
+}
+
 size_t MemorySystem::shared_load(size_t address, int& out_value) {
     out_value = shared_memory_.load(address);
     return config_.shared_memory_latency;

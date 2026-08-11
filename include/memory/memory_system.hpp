@@ -34,9 +34,10 @@ public:
     // Simulates a global memory store. Returns the simulated latency in cycles.
     size_t store(size_t address, int value);
 
-    // Warp-level global memory accesses (coalesced)
+    // Warp-level memory instructions simulating cache coalescing and generating total latency
     WarpMemoryResult warp_load(const std::vector<size_t>& addresses, std::vector<int>& out_values);
     WarpMemoryResult warp_store(const std::vector<size_t>& addresses, const std::vector<int>& values);
+    WarpMemoryResult warp_atomic_add(const std::vector<size_t>& addresses, const std::vector<int>& values);
 
     // Explicitly access shared memory (not part of the global load/store ISA for Week 1)
     size_t shared_load(size_t address, int& out_value);

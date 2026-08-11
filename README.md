@@ -20,7 +20,7 @@ SIM-SM is a cycle-level educational architectural simulator for a CUDA-like Stre
 
 The simulator is rigorously verified via GoogleTest suites covering component-level edge cases and complete system-level integration.
 
-Currently running **47/47** passing `ctest` regression tests:
+Currently running **53/53** passing `ctest` regression tests:
 
 - **Architecture Tests**: Verifies hierarchy, partial warps, block occupancy, and structural barrier invariants.
 - **Execution Tests**: Instruction level testing of math, load/store semantics, branching, and boundaries.
@@ -46,8 +46,22 @@ ctest --output-on-failure
 
 SIM-SM includes a command-line interface to execute internal benchmark scenarios (Cache Stress, Scheduler sweep, Coalescing Sweep, Vector Add).
 
+- `basic`: A simple vector addition kernel.
+- `priority`: A synthetic benchmark where threads have explicitly assigned priorities to test priority-based scheduling policies.
+- `memcpy`: Memory copy kernel verifying contiguous and strided global memory access patterns.
+- `reduction`: Parallel reduction kernel demonstrating multi-round thread synchronization using explicit `BARRIER` instructions.
+- `histogram`: Parallel histogram generation demonstrating atomic-like `WRITE_CONFLICT` stalls during colliding shared memory stores.
+
+### Running Benchmarks
+Run a specific benchmark using the `--benchmark` flag:
+
 ```bash
 ./build/gpu-sim --config configs/small_gpu.json --benchmark all
+./build/gpu-sim --config configs/small_gpu.json --benchmark basic
+./build/gpu-sim --config configs/small_gpu.json --benchmark priority
+./build/gpu-sim --config configs/small_gpu.json --benchmark memcpy
+./build/gpu-sim --config configs/small_gpu.json --benchmark reduction
+./build/gpu-sim --config configs/small_gpu.json --benchmark histogram
 ```
 *Results are output as CSV files in the `results/` directory.*
 

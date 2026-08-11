@@ -1,2 +1,4 @@
-Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM
-cache_large,1,1395,160,0.11,160,640,1.00,16
+Experiment,SMs,Policy,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM
+cache_large,1,LRU,1395,160,0.11,160,640,1.00,16
+cache_large,1,FIFO,1395,160,0.11,160,640,1.00,16
+cache_large,1,Random,1395,160,0.11,160,640,1.00,16

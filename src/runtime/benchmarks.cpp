@@ -60,6 +60,68 @@ sim_sm::Grid build_benchmark_grid(size_t num_threads, size_t block_size, size_t 
     return grid;
 }
 
+sim_sm::Kernel generate_memcpy_kernel(int iterations) {
+    std::vector<sim_sm::Instruction> insts;
+    for (int i = 0; i < iterations; ++i) {
+        // Load from src, store to dst
+        insts.push_back({sim_sm::Opcode::LOAD, 3, 0, -1, 0});
+        insts.push_back({sim_sm::Opcode::STORE, -1, 3, 1, 0});
+
+        // Add iter_stride to base pointers
+        if (i < iterations - 1) {
+            insts.push_back({sim_sm::Opcode::ADD, 0, 0, 2, 0}); // R0 += R2 (stride)
+            insts.push_back({sim_sm::Opcode::ADD, 1, 1, 2, 0}); // R1 += R2 (stride)
+        }
+    }
+    return sim_sm::Kernel("memcpy", insts);
+}
+
+sim_sm::Grid build_memcpy_grid(size_t num_threads, size_t block_size, size_t warp_size, const std::string& pattern) {
+    sim_sm::Grid grid;
+    size_t num_blocks = (num_threads + block_size - 1) / block_size;
+    if (num_threads == 0) num_blocks = 0;
+
+    for (size_t b = 0; b < num_blocks; ++b) {
+        sim_sm::ThreadBlock block(b);
+        size_t threads_in_this_block = std::min(block_size, num_threads - b * block_size);
+        size_t warps_in_this_block = (threads_in_this_block + warp_size - 1) / warp_size;
+
+        for (size_t w = 0; w < warps_in_this_block; ++w) {
+            sim_sm::Warp warp(w);
+            size_t threads_in_this_warp = std::min(warp_size, threads_in_this_block - w * warp_size);
+
+            for (size_t l = 0; l < threads_in_this_warp; ++l) {
+                size_t local_id = w * warp_size + l;
+                size_t global_id = b * block_size + local_id;
+                sim_sm::Thread thread(global_id, b, local_id, w, l);
+
+                size_t offset = 0;
+                size_t iter_stride = 0;
+                if (pattern == "contiguous") {
+                    offset = global_id * 4;
+                    iter_stride = num_threads * 4;
+                } else if (pattern == "strided") {
+                    offset = global_id * 32;
+                    iter_stride = num_threads * 32;
+                } else if (pattern == "random") {
+                    offset = ((global_id * 101) % num_threads) * 4;
+                    iter_stride = num_threads * 4;
+                }
+
+                thread.registers().write(0, 0 + offset);
+                thread.registers().write(1, 1000000 + offset);
+                thread.registers().write(2, iter_stride);
+
+                warp.add_thread(thread);
+            }
+            warp.set_priority(static_cast<int>(warp.get_warp_id()));
+            block.add_warp(warp);
+        }
+        grid.add_block(block);
+    }
+    return grid;
+}
+
 void run_experiment(const std::string& name, const SystemConfig& config,
                     const std::string& scheduler_type, bool strided,
                     size_t l1_sets = 4, size_t l1_assoc = 4, sim_sm::TraceLogger* logger = nullptr) {
@@ -68,7 +130,7 @@ void run_experiment(const std::string& name, const SystemConfig& config,
     std::ofstream out("results/" + name + ".csv");
     out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM" << "\n";
 
-    sim_sm::GPU gpu(config.num_sms, l1_sets, l1_assoc, 16, 8, 32, 1048576);
+    sim_sm::GPU gpu(config.num_sms, l1_sets, l1_assoc, 16, 8, 32, 10485760);
     if (logger) gpu.set_trace_logger(logger);
 
     for (auto& sm : gpu.get_sms()) {
@@ -130,7 +192,7 @@ void run_cache_experiment(const std::string& name, const SystemConfig& config, s
     }
 
     // 1 SM to isolate cache behavior without inter-SM interference
-    sim_sm::GPU gpu(1, l1_sets, l1_assoc, 16, 8, 32, 1048576, policy);
+    sim_sm::GPU gpu(1, l1_sets, l1_assoc, 16, 8, 32, 10485760, policy);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -352,7 +414,7 @@ void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int
     std::ofstream out("results/" + name + ".csv");
     out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM\n";
 
-    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 1048576);
+    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -442,6 +504,502 @@ void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int
     out.close();
 }
 
+void run_memcpy_benchmark(const std::string& name, const SystemConfig& config, size_t num_threads, const std::string& pattern, sim_sm::TraceLogger* logger = nullptr) {
+    std::filesystem::create_directories("results");
+
+    // Append or create depending on whether the file exists
+    bool file_exists = std::filesystem::exists("results/" + name + ".csv");
+    std::ofstream out("results/" + name + ".csv", std::ios::app);
+    if (!file_exists) {
+        out << "Experiment,SMs,Pattern,TotalCycles,Instructions,IPC,MemInsts,MemTxns,EffectiveBandwidthBpc\n";
+    }
+
+    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
+    if (logger) gpu.set_trace_logger(logger);
+    for (auto& sm : gpu.get_sms()) {
+        sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
+    }
+
+    sim_sm::GlobalMemory& gm = gpu.get_global_memory();
+
+    int iterations = 10;
+    std::vector<std::vector<int>> cpu_src(num_threads, std::vector<int>(iterations));
+    std::vector<size_t> offsets(num_threads);
+    std::vector<size_t> iter_strides(num_threads);
+
+    for (size_t i = 0; i < num_threads; ++i) {
+        size_t offset = 0;
+        size_t iter_stride = 0;
+        if (pattern == "contiguous") {
+            offset = i * 4;
+            iter_stride = num_threads * 4;
+        } else if (pattern == "strided") {
+            offset = i * 32;
+            iter_stride = num_threads * 32;
+        } else if (pattern == "random") {
+            offset = ((i * 101) % num_threads) * 4;
+            iter_stride = num_threads * 4;
+        }
+        offsets[i] = offset;
+        iter_strides[i] = iter_stride;
+
+        for (int iter = 0; iter < iterations; ++iter) {
+            int val = ((i + iter) % 255) + 1;
+            cpu_src[i][iter] = val;
+            gm.store(0 + offset + iter * iter_stride, val);
+            gm.store(1000000 + offset + iter * iter_stride, 0); // initialize dst to 0
+        }
+    }
+
+    sim_sm::Kernel kernel = generate_memcpy_kernel(iterations);
+    sim_sm::Grid grid = build_memcpy_grid(num_threads, config.block_size, config.warp_size, pattern);
+
+    sim_sm::KernelResourceRequirements req = {10, 0};
+
+    gpu.launch_kernel(kernel, grid, config, req);
+    gpu.run_to_completion(kernel);
+
+    bool correct = true;
+    for (size_t i = 0; i < num_threads; ++i) {
+        for (int iter = 0; iter < iterations; ++iter) {
+            size_t offset = offsets[i] + iter * iter_strides[i];
+            int gpu_val = gm.load(1000000 + offset);
+            if (gpu_val != cpu_src[i][iter]) {
+                correct = false;
+                std::cout << "Memcpy Error for thread " << i << " iter " << iter << ": GPU=" << gpu_val << ", CPU=" << cpu_src[i][iter] << std::endl;
+            }
+        }
+    }
+
+    if (!correct) {
+        throw std::runtime_error("Memcpy Correctness check FAILED for pattern: " + pattern);
+    } else {
+        std::cout << "Memcpy (" << pattern << ") Correctness check passed!" << std::endl;
+    }
+
+    size_t total_cycles = 0;
+    size_t total_insts = 0;
+    size_t total_mem_insts = 0;
+    size_t total_mem_txns = 0;
+
+    for (const auto& sm : gpu.get_sms()) {
+        const auto& c = sm.get_counters();
+        total_cycles += c.get_cycles();
+        total_insts += c.get_instructions_retired();
+        total_mem_insts += c.get_memory_instructions();
+        total_mem_txns += c.get_memory_transactions();
+    }
+
+    size_t max_cycles = 0;
+    for (const auto& sm : gpu.get_sms()) {
+        max_cycles = std::max(max_cycles, sm.get_counters().get_cycles());
+    }
+
+    double ipc = (max_cycles > 0) ? (double)total_insts / max_cycles : 0.0;
+
+    // Effective bandwidth: total bytes successfully copied / max_cycles
+    // each thread copies 4 bytes `iterations` times.
+    double effective_bandwidth = (max_cycles > 0) ? (double)(num_threads * 4 * iterations) / max_cycles : 0.0;
+
+    out << name << "," << config.num_sms << "," << pattern << "," << max_cycles << ","
+        << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
+        << total_mem_insts << "," << total_mem_txns << ","
+        << std::fixed << std::setprecision(2) << effective_bandwidth << "\n";
+    out.close();
+}
+
+sim_sm::Kernel generate_reduction_kernel(int block_size) {
+    std::vector<sim_sm::Instruction> insts;
+
+    // 1. Load from global memory and store to shared memory
+    insts.push_back({sim_sm::Opcode::LOAD, 10, 0, -1, 0});  // R10 = global_mem[R0]
+    insts.push_back({sim_sm::Opcode::STORE, -1, 10, 1, 0}); // shared_mem[R1] = R10
+
+    // 2. Initial BARRIER
+    insts.push_back({sim_sm::Opcode::BARRIER, 0, 0, 0, 0});
+
+    // 3. Reduction rounds
+    insts.push_back({sim_sm::Opcode::MOV, 19, -1, -1, 0}); // R19 = 0
+
+    int step = 0;
+    for (int stride = block_size / 2; stride > 0; stride /= 2) {
+        int active_reg = 20 + step;
+
+        insts.push_back({sim_sm::Opcode::CMP, -1, active_reg, 19, 0}); // CMP R_active, 0
+        int branch_inst_idx = insts.size();
+        insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});      // BRANCH if active == 0
+
+        // Active thread: LOAD shared[tid], LOAD shared[tid + stride], ADD, STORE
+        insts.push_back({sim_sm::Opcode::LOAD, 10, 1, -1, 0}); // R10 = shared_mem[R1]
+
+        insts.push_back({sim_sm::Opcode::MOV, 15, -1, -1, stride * 4}); // R15 = stride * 4
+        insts.push_back({sim_sm::Opcode::ADD, 16, 1, 15, 0});           // R16 = R1 + stride * 4
+        insts.push_back({sim_sm::Opcode::LOAD, 11, 16, -1, 0});         // R11 = shared_mem[R1 + stride*4]
+
+        insts.push_back({sim_sm::Opcode::ADD, 12, 10, 11, 0});          // R12 = R10 + R11
+        insts.push_back({sim_sm::Opcode::STORE, -1, 12, 1, 0});         // shared_mem[R1] = R12
+
+        int skip_adding_label = insts.size();
+        insts[branch_inst_idx].immediate = skip_adding_label - branch_inst_idx;
+
+        insts.push_back({sim_sm::Opcode::BARRIER, 0, 0, 0, 0});
+        step++;
+    }
+
+    // 4. Thread 0 writes to global output
+    insts.push_back({sim_sm::Opcode::CMP, -1, 3, 19, 0}); // CMP R3(is_thread_0), 0
+    int final_branch = insts.size();
+    insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
+
+    // thread 0
+    insts.push_back({sim_sm::Opcode::LOAD, 10, 1, -1, 0}); // R10 = shared_mem[R1]
+    insts.push_back({sim_sm::Opcode::STORE, -1, 10, 2, 0});// global_out[R2] = R10
+
+    int end_label = insts.size();
+    insts[final_branch].immediate = end_label - final_branch;
+
+    return sim_sm::Kernel("reduction", insts);
+}
+
+sim_sm::Kernel generate_histogram_kernel(int num_bins, int block_size) {
+    std::vector<sim_sm::Instruction> insts;
+
+    // R0 = input addr for this thread
+    // R1 = shared mem base
+    // R2 = global output base
+    // R3 = num_bins
+    // R4 = is_active (thread < num_elements)
+    // R5 = local_id
+
+    int iters = (num_bins + block_size - 1) / block_size;
+    if (iters > 8) throw std::runtime_error("iters too large for register predicates");
+
+    // 1. Zero shared bins in parallel
+    insts.push_back({sim_sm::Opcode::MOV, 19, -1, -1, 0}); // 0 value for predicate check
+    insts.push_back({sim_sm::Opcode::MOV, 12, -1, -1, 4});
+
+    for (int i = 0; i < iters; ++i) {
+        insts.push_back({sim_sm::Opcode::CMP, -1, 20 + i, 19, 0}); // predicate = (valid == 0)
+        int skip_branch = insts.size();
+        insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
+
+        int offset = i * block_size;
+        insts.push_back({sim_sm::Opcode::MOV, 15, -1, -1, offset});
+        insts.push_back({sim_sm::Opcode::ADD, 16, 5, 15, 0}); // R16 = local_id + offset
+        insts.push_back({sim_sm::Opcode::MUL, 13, 16, 12, 0}); // R13 = R16 * 4
+        insts.push_back({sim_sm::Opcode::ADD, 14, 1, 13, 0});  // R14 = shared_base + R13
+        insts.push_back({sim_sm::Opcode::STORE, -1, 19, 14, 0});// shared[R14] = 0
+
+        insts[skip_branch].immediate = insts.size() - skip_branch;
+    }
+
+    insts.push_back({sim_sm::Opcode::BARRIER, 0, 0, 0, 0});
+
+    // 2. Load input, increment shared bin
+    insts.push_back({sim_sm::Opcode::CMP, -1, 4, 19, 0}); // predicate = (is_active == 0)
+    int skip_hist_branch = insts.size();
+    insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
+
+    insts.push_back({sim_sm::Opcode::LOAD, 10, 0, -1, 0}); // R10 = global[R0]
+    insts.push_back({sim_sm::Opcode::MOV, 12, -1, -1, 4});
+    insts.push_back({sim_sm::Opcode::MUL, 13, 10, 12, 0}); // R13 = val * 4
+    insts.push_back({sim_sm::Opcode::ADD, 14, 1, 13, 0});  // R14 = shared_base + val * 4
+
+    insts.push_back({sim_sm::Opcode::MOV, 16, -1, -1, 1});
+    insts.push_back({sim_sm::Opcode::ATOMIC_ADD, -1, 16, 14, 0}); // ATOMIC_ADD value=R16(1) to addr=R14
+
+    int after_hist = insts.size();
+    insts[skip_hist_branch].immediate = after_hist - skip_hist_branch;
+
+    insts.push_back({sim_sm::Opcode::BARRIER, 0, 0, 0, 0});
+
+    // 3. Write shared bins to global output
+    for (int i = 0; i < iters; ++i) {
+        insts.push_back({sim_sm::Opcode::CMP, -1, 20 + i, 19, 0}); // predicate = (valid == 0)
+        int skip_branch = insts.size();
+        insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
+
+        int offset = i * block_size;
+        insts.push_back({sim_sm::Opcode::MOV, 15, -1, -1, offset});
+        insts.push_back({sim_sm::Opcode::ADD, 16, 5, 15, 0}); // R16 = local_id + offset
+
+        insts.push_back({sim_sm::Opcode::MUL, 13, 16, 12, 0}); // R13 = R16 * 4
+        insts.push_back({sim_sm::Opcode::ADD, 14, 1, 13, 0});  // R14 = shared_base + R13
+        insts.push_back({sim_sm::Opcode::LOAD, 17, 14, -1, 0});// R17 = shared[R14]
+
+        insts.push_back({sim_sm::Opcode::ADD, 18, 2, 13, 0});  // R18 = global_out_base + R13
+        insts.push_back({sim_sm::Opcode::STORE, -1, 17, 18, 0});// global[R18] = R17
+
+        insts[skip_branch].immediate = insts.size() - skip_branch;
+    }
+
+    return sim_sm::Kernel("histogram", insts);
+}
+
+sim_sm::Grid build_histogram_grid(size_t num_elements, size_t block_size, size_t warp_size, size_t num_bins) {
+    sim_sm::Grid grid;
+    size_t num_blocks = (num_elements + block_size - 1) / block_size;
+    if (num_elements == 0) num_blocks = 0;
+
+    size_t SHARED_MEM_BASE = 0x10000000;
+    size_t global_in_base = 0;
+    size_t global_out_base = num_elements * 4;
+
+    for (size_t b = 0; b < num_blocks; ++b) {
+        sim_sm::ThreadBlock block(b);
+        size_t threads_in_this_block = std::min(block_size, num_elements - b * block_size);
+        size_t warps_in_this_block = (threads_in_this_block + warp_size - 1) / warp_size;
+
+        for (size_t w = 0; w < warps_in_this_block; ++w) {
+            sim_sm::Warp warp(w);
+            size_t threads_in_this_warp = std::min(warp_size, threads_in_this_block - w * warp_size);
+
+            for (size_t l = 0; l < threads_in_this_warp; ++l) {
+                size_t local_id = w * warp_size + l;
+                size_t global_id = b * block_size + local_id;
+                sim_sm::Thread thread(global_id, b, local_id, w, l);
+
+                thread.registers().write(0, global_in_base + global_id * 4);
+                thread.registers().write(1, SHARED_MEM_BASE + b * num_bins * 4);
+                thread.registers().write(2, global_out_base + b * num_bins * 4);
+                thread.registers().write(3, num_bins);
+                thread.registers().write(4, (global_id < num_elements) ? 1 : 0);
+                thread.registers().write(5, local_id);
+                for (int iter = 0; iter < 8; ++iter) {
+                    thread.registers().write(20 + iter, (local_id + iter * block_size < num_bins) ? 1 : 0);
+                }
+
+                warp.add_thread(thread);
+            }
+            warp.set_priority(static_cast<int>(warp.get_warp_id()));
+            block.add_warp(warp);
+        }
+        grid.add_block(block);
+    }
+    return grid;
+}
+
+sim_sm::Grid build_reduction_grid(size_t num_elements, size_t block_size, size_t warp_size) {
+    sim_sm::Grid grid;
+    size_t num_blocks = (num_elements + block_size - 1) / block_size;
+    if (num_elements == 0) num_blocks = 0;
+
+    size_t SHARED_MEM_BASE = 0x10000000;
+    size_t global_in_base = 0;
+    size_t global_out_base = num_elements * 4;
+
+    for (size_t b = 0; b < num_blocks; ++b) {
+        sim_sm::ThreadBlock block(b);
+        size_t threads_in_this_block = std::min(block_size, num_elements - b * block_size);
+        size_t warps_in_this_block = (threads_in_this_block + warp_size - 1) / warp_size;
+
+        for (size_t w = 0; w < warps_in_this_block; ++w) {
+            sim_sm::Warp warp(w);
+            size_t threads_in_this_warp = std::min(warp_size, threads_in_this_block - w * warp_size);
+
+            for (size_t l = 0; l < threads_in_this_warp; ++l) {
+                size_t local_id = w * warp_size + l;
+                size_t global_id = b * block_size + local_id;
+                sim_sm::Thread thread(global_id, b, local_id, w, l);
+
+                thread.registers().write(0, global_in_base + global_id * 4);
+                thread.registers().write(1, SHARED_MEM_BASE + b * block_size * 4 + local_id * 4);
+                thread.registers().write(2, global_out_base + b * 4);
+                thread.registers().write(3, (local_id == 0) ? 1 : 0);
+
+                int step = 0;
+                for (size_t stride = block_size / 2; stride > 0; stride /= 2) {
+                    thread.registers().write(20 + step, (local_id < stride) ? 1 : 0);
+                    step++;
+                }
+
+                warp.add_thread(thread);
+            }
+            warp.set_priority(static_cast<int>(warp.get_warp_id()));
+            block.add_warp(warp);
+        }
+        grid.add_block(block);
+    }
+    return grid;
+}
+
+void run_reduction_benchmark(const std::string& name, const SystemConfig& config, size_t num_elements, sim_sm::TraceLogger* logger = nullptr) {
+    std::filesystem::create_directories("results");
+    bool file_exists = std::filesystem::exists("results/" + name + ".csv");
+    std::ofstream out("results/" + name + ".csv", std::ios::app);
+    if (!file_exists) {
+        out << "Experiment,SMs,Elements,TotalCycles,WarpBarrierStallCycles,Instructions,IPC,MemInsts,MemTxns\n";
+    }
+
+    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
+    if (logger) gpu.set_trace_logger(logger);
+    for (auto& sm : gpu.get_sms()) {
+        sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
+    }
+
+    sim_sm::GlobalMemory& gm = gpu.get_global_memory();
+
+    std::vector<int> cpu_src(num_elements);
+    size_t num_blocks = (num_elements + config.block_size - 1) / config.block_size;
+    std::vector<int> cpu_out(num_blocks, 0);
+
+    for (size_t i = 0; i < num_elements; ++i) {
+        int val = (i % 5) + 1;
+        cpu_src[i] = val;
+        gm.store(i * 4, val);
+        cpu_out[i / config.block_size] += val;
+    }
+
+    for (size_t b = 0; b < num_blocks; ++b) {
+        gm.store(num_elements * 4 + b * 4, 0);
+    }
+
+    sim_sm::Kernel kernel = generate_reduction_kernel(config.block_size);
+    sim_sm::Grid grid = build_reduction_grid(num_elements, config.block_size, config.warp_size);
+
+    sim_sm::KernelResourceRequirements req = {32, config.block_size * 4}; // 32 registers, shared memory
+
+    gpu.launch_kernel(kernel, grid, config, req);
+    gpu.run_to_completion(kernel);
+
+    bool correct = true;
+    for (size_t b = 0; b < num_blocks; ++b) {
+        int gpu_val = gm.load(num_elements * 4 + b * 4);
+        if (gpu_val != cpu_out[b]) {
+            correct = false;
+            std::cout << "Reduction Error for block " << b << ": GPU=" << gpu_val << ", CPU=" << cpu_out[b] << std::endl;
+        }
+    }
+
+    if (!correct) {
+        throw std::runtime_error("Reduction Correctness check FAILED");
+    } else {
+        std::cout << "Reduction Correctness check passed!" << std::endl;
+    }
+
+    size_t total_cycles = 0;
+    size_t total_insts = 0;
+    size_t total_mem_insts = 0;
+    size_t total_mem_txns = 0;
+    size_t total_barrier_stalls = 0;
+
+    for (const auto& sm : gpu.get_sms()) {
+        const auto& c = sm.get_counters();
+        total_cycles += c.get_cycles();
+        total_insts += c.get_instructions_retired();
+        total_mem_insts += c.get_memory_instructions();
+        total_mem_txns += c.get_memory_transactions();
+        total_barrier_stalls += c.get_warp_barrier_stall_cycles();
+    }
+
+    size_t max_cycles = 0;
+    for (const auto& sm : gpu.get_sms()) {
+        max_cycles = std::max(max_cycles, sm.get_counters().get_cycles());
+    }
+
+    double ipc = (max_cycles > 0) ? (double)total_insts / max_cycles : 0.0;
+
+    out << name << "," << config.num_sms << "," << num_elements << "," << max_cycles << ","
+        << total_barrier_stalls << "," << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
+        << total_mem_insts << "," << total_mem_txns << "\n";
+    out.close();
+}
+
+void run_histogram_benchmark(const std::string& name, const SystemConfig& config, size_t num_elements, size_t num_bins, const std::string& pattern, sim_sm::TraceLogger* logger = nullptr) {
+    std::filesystem::create_directories("results");
+    bool file_exists = std::filesystem::exists("results/" + name + ".csv");
+    std::ofstream out("results/" + name + ".csv", std::ios::app);
+    if (!file_exists) {
+        out << "Experiment,SMs,Pattern,Elements,Bins,TotalCycles,WriteConflictStalls,Instructions,IPC\n";
+    }
+
+    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
+    if (logger) gpu.set_trace_logger(logger);
+    for (auto& sm : gpu.get_sms()) {
+        sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
+    }
+
+    sim_sm::GlobalMemory& gm = gpu.get_global_memory();
+
+    size_t num_blocks = (num_elements + config.block_size - 1) / config.block_size;
+    std::vector<int> cpu_hist(num_blocks * num_bins, 0);
+
+    for (size_t i = 0; i < num_elements; ++i) {
+        int val;
+        if (pattern == "uniform") {
+            val = (i % num_bins);
+        } else if (pattern == "skewed") {
+            val = (i % 4);
+        } else {
+            val = (i % (num_bins / 2));
+        }
+        gm.store(i * 4, val);
+        size_t block_idx = i / config.block_size;
+        cpu_hist[block_idx * num_bins + val]++;
+    }
+
+    for (size_t b = 0; b < num_blocks; ++b) {
+        for (size_t bin = 0; bin < num_bins; ++bin) {
+            gm.store(num_elements * 4 + b * num_bins * 4 + bin * 4, 0);
+        }
+    }
+
+    sim_sm::Kernel kernel = generate_histogram_kernel(num_bins, config.block_size);
+    sim_sm::Grid grid = build_histogram_grid(num_elements, config.block_size, config.warp_size, num_bins);
+
+    sim_sm::KernelResourceRequirements req = {32, num_bins * 4}; // shared memory per block for bins
+
+    gpu.launch_kernel(kernel, grid, config, req);
+    gpu.run_to_completion(kernel);
+
+    bool correct = true;
+    for (size_t b = 0; b < num_blocks; ++b) {
+        for (size_t bin = 0; bin < num_bins; ++bin) {
+            int gpu_val = gm.load(num_elements * 4 + b * num_bins * 4 + bin * 4);
+            int cpu_val = cpu_hist[b * num_bins + bin];
+            if (gpu_val != cpu_val) {
+                correct = false;
+                std::cout << "Histogram Error in block " << b << ", bin " << bin << ": GPU=" << gpu_val << ", CPU=" << cpu_val << std::endl;
+            }
+        }
+    }
+
+    if (!correct) {
+        throw std::runtime_error("Histogram Correctness check FAILED for pattern: " + pattern);
+    } else {
+        std::cout << "Histogram (" << pattern << ") Correctness check passed!" << std::endl;
+    }
+
+    size_t total_cycles = 0;
+    size_t total_insts = 0;
+    size_t total_write_conflict_stalls = 0;
+
+    for (const auto& sm : gpu.get_sms()) {
+        const auto& c = sm.get_counters();
+        total_cycles += c.get_cycles();
+        total_insts += c.get_instructions_retired();
+        total_write_conflict_stalls += c.get_stalls(sim_sm::StallReason::WriteConflict);
+    }
+
+    size_t max_cycles = 0;
+    for (const auto& sm : gpu.get_sms()) {
+        max_cycles = std::max(max_cycles, sm.get_counters().get_cycles());
+    }
+
+    if (total_write_conflict_stalls == 0) {
+        std::cout << "Warning: No WRITE_CONFLICT stalls recorded in Histogram benchmark (" << pattern << ")!" << std::endl;
+    } else {
+        std::cout << "Histogram benchmark (" << pattern << ") recorded " << total_write_conflict_stalls << " WRITE_CONFLICT stalls." << std::endl;
+    }
+
+    double ipc = (max_cycles > 0) ? (double)total_insts / max_cycles : 0.0;
+
+    out << name << "," << config.num_sms << "," << pattern << "," << num_elements << "," << num_bins << "," << max_cycles << ","
+        << total_write_conflict_stalls << "," << total_insts << ","
+        << std::fixed << std::setprecision(2) << ipc << "\n";
+    out.close();
+}
+
 void run_benchmarks(const std::string& config_path, const std::string& b_type, bool debug_mode, int trace_level_val, const std::string& trace_file) {
     SystemConfig base_config = load_config(config_path);
 
@@ -454,9 +1012,40 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type, b
     bool run_gemm = run_all || (b_type == "matrix_multiply");
     bool run_basic = run_all || (b_type == "basic");
     bool run_priority = run_all || (b_type == "priority");
+    bool run_memcpy = run_all || (b_type == "memcpy");
+    bool run_reduction = run_all || (b_type == "reduction");
+    bool run_histogram = run_all || (b_type == "histogram");
 
-    if (!run_all && !run_gemm && !run_basic && !run_priority) {
+    if (!run_all && !run_gemm && !run_basic && !run_priority && !run_memcpy && !run_reduction && !run_histogram) {
         throw std::runtime_error("Unknown benchmark: " + b_type);
+    }
+
+    if (run_memcpy) {
+        std::filesystem::remove("results/memcpy.csv");
+        run_memcpy_benchmark("memcpy", base_config, 1024, "contiguous", logger.get());
+        run_memcpy_benchmark("memcpy", base_config, 1024, "strided", logger.get());
+        run_memcpy_benchmark("memcpy", base_config, 1024, "random", logger.get());
+    }
+
+    if (run_reduction) {
+        std::filesystem::remove("results/reduction.csv");
+        SystemConfig reduction_config = base_config;
+        reduction_config.block_size = 256;
+        run_reduction_benchmark("reduction", reduction_config, 1024, logger.get());
+    }
+
+    if (run_histogram) {
+        std::filesystem::remove("results/histogram.csv");
+        std::filesystem::remove("results/histogram_low_occupancy.csv");
+        SystemConfig histogram_config = base_config;
+        histogram_config.block_size = 256;
+        run_histogram_benchmark("histogram", histogram_config, 2048, 256, "uniform", logger.get());
+        run_histogram_benchmark("histogram", histogram_config, 2048, 256, "skewed", logger.get());
+
+        SystemConfig low_occupancy = base_config;
+        low_occupancy.block_size = 32;
+        run_histogram_benchmark("histogram_low_occupancy", low_occupancy, 32, 256, "uniform", logger.get());
+        run_histogram_benchmark("histogram_low_occupancy", low_occupancy, 32, 256, "skewed", logger.get());
     }
 
     if (run_gemm) {
@@ -476,7 +1065,7 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type, b
         if (!run_priority) {
             run_experiment("scheduler_priority", base_config, "priority", false, 4, 4, logger.get());
         }
-        
+
         // Remove previous cache sweep results to avoid appending to old runs
         std::filesystem::remove("results/cache_small.csv");
         std::filesystem::remove("results/cache_large.csv");
@@ -486,7 +1075,7 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type, b
             run_cache_experiment("cache_small", base_config, 2, 2, policy, logger.get());
             run_cache_experiment("cache_large", base_config, 16, 4, policy, logger.get());
         }
-        
+
         run_experiment("coalesced", base_config, "rr", false, 4, 4, logger.get());
         run_experiment("strided", base_config, "rr", true, 4, 4, logger.get());
 

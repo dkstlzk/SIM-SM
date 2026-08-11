@@ -62,6 +62,14 @@ double PerformanceCounter::get_transactions_per_memory_instruction() const {
     return static_cast<double>(memory_transactions_) / memory_instructions_;
 }
 
+void PerformanceCounter::add_warp_barrier_stall_cycles(size_t count) {
+    warp_barrier_stall_cycles_ += count;
+}
+
+size_t PerformanceCounter::get_warp_barrier_stall_cycles() const {
+    return warp_barrier_stall_cycles_;
+}
+
 void PerformanceCounter::set_trace_logger(TraceLogger* logger) {
     trace_logger_ = logger;
 }

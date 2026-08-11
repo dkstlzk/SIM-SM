@@ -57,8 +57,16 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
     }
 
     // 1. Tick stalled warps
+    size_t barrier_stalls = 0;
     for (auto& warp : warps_) {
         warp.tick_stall();
+        if (warp.get_state() == WarpState::StalledAtBarrier) {
+            barrier_stalls++;
+        }
+    }
+    
+    if (barrier_stalls > 0) {
+        counters_.add_warp_barrier_stall_cycles(barrier_stalls);
     }
 
     counters_.increment_cycles();
@@ -133,6 +141,10 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
         if (result.status != ExecutionStatus::BarrierReached && result.latency > 1) {
             selected_warp->stall(result.latency - 1);
         }
+    }
+
+    for (size_t i = 0; i < result.write_conflict_stalls; ++i) {
+        counters_.add_stall(StallReason::WriteConflict);
     }
 
     counters_.increment_instructions_retired();

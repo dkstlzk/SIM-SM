@@ -1,0 +1,4 @@
+Experiment,SMs,Pattern,TotalCycles,Instructions,IPC,MemInsts,MemTxns,EffectiveBandwidthBpc
+memcpy,4,contiguous,3021,1216,0.40,640,2560,13.56
+memcpy,4,strided,3553,1216,0.34,640,20480,11.53
+memcpy,4,random,3019,1216,0.40,640,20480,13.57

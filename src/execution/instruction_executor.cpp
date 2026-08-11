@@ -1,5 +1,6 @@
 #include "execution/instruction_executor.hpp"
 #include <stdexcept>
+#include <unordered_map>
 
 namespace sim_sm {
 
@@ -10,6 +11,7 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
     std::string memory_space = "";
 
     size_t warp_pc = warp.get_warp_pc();
+    size_t write_conflict_stalls = 0;
 
     // Note: Active threads are represented implicitly by threads whose PC matches the warp_pc.
     switch (inst.opcode) {
@@ -89,12 +91,21 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
             std::vector<size_t> addresses;
             std::vector<int> values;
             std::vector<size_t> active_indices;
+            std::unordered_map<size_t, size_t> address_counts;
+
             for (size_t i = 0; i < warp.get_threads().size(); ++i) {
                 if (static_cast<size_t>(warp.get_threads()[i].pc()) != warp_pc) continue;
                 size_t base = (inst.src2 != -1) ? warp.get_threads()[i].registers().read(inst.src2) : 0;
-                addresses.push_back(base + inst.immediate);
+                size_t addr = base + inst.immediate;
+                addresses.push_back(addr);
                 values.push_back(warp.get_threads()[i].registers().read(inst.src1));
                 active_indices.push_back(i);
+                address_counts[addr]++;
+            }
+
+            size_t max_collisions = 0;
+            for (const auto& pair : address_counts) {
+                if (pair.second > max_collisions) max_collisions = pair.second;
             }
 
             if (!addresses.empty()) {
@@ -106,6 +117,53 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
                 WarpMemoryResult res = memory.warp_store(addresses, values);
                 max_latency = res.total_latency;
                 memory_transactions = res.num_transactions;
+
+                if (max_collisions > 1) {
+                    write_conflict_stalls = max_collisions - 1;
+                    max_latency += write_conflict_stalls;
+                }
+
+                for (size_t thread_idx : active_indices) {
+                    warp.get_threads()[thread_idx].set_pc(warp.get_threads()[thread_idx].pc() + 1);
+                }
+            }
+            break;
+        }
+        case Opcode::ATOMIC_ADD: {
+            std::vector<size_t> addresses;
+            std::vector<int> values;
+            std::vector<size_t> active_indices;
+            std::unordered_map<size_t, size_t> address_counts;
+
+            for (size_t i = 0; i < warp.get_threads().size(); ++i) {
+                if (static_cast<size_t>(warp.get_threads()[i].pc()) != warp_pc) continue;
+                size_t base = (inst.src2 != -1) ? warp.get_threads()[i].registers().read(inst.src2) : 0;
+                size_t addr = base + inst.immediate;
+                addresses.push_back(addr);
+                values.push_back(warp.get_threads()[i].registers().read(inst.src1));
+                active_indices.push_back(i);
+                address_counts[addr]++;
+            }
+
+            size_t max_collisions = 0;
+            for (const auto& pair : address_counts) {
+                if (pair.second > max_collisions) max_collisions = pair.second;
+            }
+
+            if (!addresses.empty()) {
+                if (addresses[0] >= MemorySystem::SHARED_MEM_BASE) {
+                    memory_space = "SHARED";
+                } else {
+                    memory_space = "GLOBAL";
+                }
+                WarpMemoryResult res = memory.warp_atomic_add(addresses, values);
+                max_latency = res.total_latency;
+                memory_transactions = res.num_transactions;
+
+                if (max_collisions > 1) {
+                    write_conflict_stalls = max_collisions - 1;
+                    max_latency += write_conflict_stalls;
+                }
 
                 for (size_t thread_idx : active_indices) {
                     warp.get_threads()[thread_idx].set_pc(warp.get_threads()[thread_idx].pc() + 1);
@@ -153,7 +211,7 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
             throw std::runtime_error("Unknown opcode");
     }
 
-    return {overall_status, max_latency, memory_transactions, memory_space};
+    return {overall_status, max_latency, memory_transactions, memory_space, write_conflict_stalls};
 }
 
 } // namespace sim_sm

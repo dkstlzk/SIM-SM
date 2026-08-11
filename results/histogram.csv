@@ -1,0 +1,3 @@
+Experiment,SMs,Pattern,Elements,Bins,TotalCycles,WriteConflictStalls,Instructions,IPC
+histogram,4,uniform,2048,256,1855,0,1792,0.97
+histogram,4,skewed,2048,256,1855,448,1792,0.97

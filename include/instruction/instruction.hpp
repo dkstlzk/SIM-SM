@@ -11,7 +11,8 @@ enum class Opcode {
     STORE,
     CMP,
     BRANCH,
-    BARRIER
+    BARRIER,
+    ATOMIC_ADD
 };
 
 // Operand conventions for the Week 1 toy ISA:
