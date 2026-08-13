@@ -23,6 +23,8 @@ SystemConfig load_config(const std::string& filepath) {
     config.max_blocks_per_sm = j.value("max_blocks_per_sm", 32);
     config.max_shared_memory_per_sm = j.value("max_shared_memory_per_sm", 65536);
     config.max_registers_per_sm = j.value("max_registers_per_sm", 65536);
+    config.max_warps_per_sm = j.value("max_warps_per_sm",
+        config.max_threads_per_sm / config.warp_size);
 
     return config;
 }

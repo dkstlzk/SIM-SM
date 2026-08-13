@@ -12,7 +12,9 @@ enum class Opcode {
     CMP,
     BRANCH,
     BARRIER,
-    ATOMIC_ADD
+    ATOMIC_ADD,
+    SSY,
+    SYNC
 };
 
 // Operand conventions for the Week 1 toy ISA:

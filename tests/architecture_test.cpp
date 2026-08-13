@@ -372,7 +372,13 @@ TEST(SMTest, DivergentBarrierWithinWarp) {
     // Tick BRANCH
     sm.tick(kernel, mem);
     // Tick BARRIER (should throw)
-    EXPECT_THROW(sm.tick(kernel, mem), std::runtime_error);
+    EXPECT_THROW({
+        // Since the SIMT stack decides which path to explore first, 
+        // we just run ticks until the divergent barrier is encountered.
+        for (int i = 0; i < 10; ++i) {
+            sm.tick(kernel, mem);
+        }
+    }, std::runtime_error);
 }
 
 TEST(SMTest, MalformedBarrierCompletedWarp) {

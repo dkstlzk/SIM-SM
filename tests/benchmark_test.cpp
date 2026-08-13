@@ -11,6 +11,10 @@ TEST(BenchmarkTest, MemcpyCorrectnessContiguous) {
     config.num_sms = 1;
     config.block_size = 64;
     config.warp_size = 32;
+    config.max_blocks_per_sm = 16;
+    config.max_threads_per_sm = 1024;
+    config.max_shared_memory_per_sm = 65536;
+    config.max_registers_per_sm = 65536;
     sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -53,6 +57,10 @@ TEST(BenchmarkTest, MemcpyCorrectnessStrided) {
     config.num_sms = 1;
     config.block_size = 64;
     config.warp_size = 32;
+    config.max_blocks_per_sm = 16;
+    config.max_threads_per_sm = 1024;
+    config.max_shared_memory_per_sm = 65536;
+    config.max_registers_per_sm = 65536;
     sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -95,6 +103,10 @@ TEST(BenchmarkTest, ReductionCorrectness) {
     config.num_sms = 1;
     config.block_size = 64;
     config.warp_size = 32;
+    config.max_blocks_per_sm = 16;
+    config.max_threads_per_sm = 1024;
+    config.max_shared_memory_per_sm = 65536;
+    config.max_registers_per_sm = 65536;
 
     sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
     for (auto& sm : gpu.get_sms()) {
@@ -135,6 +147,10 @@ TEST(BenchmarkTest, HistogramWriteConflicts) {
     config.num_sms = 1;
     config.block_size = 64;
     config.warp_size = 32;
+    config.max_blocks_per_sm = 16;
+    config.max_threads_per_sm = 1024;
+    config.max_shared_memory_per_sm = 65536;
+    config.max_registers_per_sm = 65536;
 
     sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
     for (auto& sm : gpu.get_sms()) {

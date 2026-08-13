@@ -15,6 +15,7 @@ struct SystemConfig {
     size_t max_blocks_per_sm;
     size_t max_shared_memory_per_sm;
     size_t max_registers_per_sm;
+    size_t max_warps_per_sm = 64;
 };
 
 SystemConfig load_config(const std::string& filepath);

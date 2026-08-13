@@ -88,7 +88,6 @@ TEST_F(ExecutionTest, BranchExecutionTaken) {
 
     Instruction cmp_inst = {Opcode::CMP, 0, 0, 1, 0};
     EXPECT_EQ(InstructionExecutor::execute(cmp_inst, warp_, memory_).status, ExecutionStatus::Completed);
-    warp_.set_warp_pc(warp_.get_warp_pc() + 1);
     EXPECT_TRUE(get_thread().predicate());
     EXPECT_EQ(get_thread().pc(), 6);
 
@@ -106,7 +105,6 @@ TEST_F(ExecutionTest, BranchExecutionNotTaken) {
 
     Instruction cmp_inst = {Opcode::CMP, 0, 0, 1, 0};
     EXPECT_EQ(InstructionExecutor::execute(cmp_inst, warp_, memory_).status, ExecutionStatus::Completed);
-    warp_.set_warp_pc(warp_.get_warp_pc() + 1);
     EXPECT_FALSE(get_thread().predicate());
     EXPECT_EQ(get_thread().pc(), 6);
 

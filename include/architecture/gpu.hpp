@@ -37,7 +37,9 @@ private:
     GlobalMemory global_memory_;
     std::vector<ThreadBlock> pending_blocks_;
     size_t current_block_idx_ = 0;
-    size_t resident_blocks_per_sm_ = 0;
+    
+    SystemConfig config_{};
+    KernelResourceRequirements req_{};
 };
 
 } // namespace sim_sm

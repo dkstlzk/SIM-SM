@@ -2,6 +2,7 @@
 #include "execution/instruction_executor.hpp"
 #include "runtime/trace_logger.hpp"
 #include <stdexcept>
+#include <algorithm>
 
 namespace sim_sm {
 
@@ -38,7 +39,7 @@ std::vector<Warp>& SM::get_warps() {
 }
 
 bool SM::is_completed() const {
-    if (warps_.empty()) return true;
+    if (warps_.empty() && resident_blocks_.empty()) return true;
     for (const auto& warp : warps_) {
         if (warp.get_state() != WarpState::Completed) {
             return false;
@@ -49,6 +50,88 @@ bool SM::is_completed() const {
 
 void SM::clear_warps() {
     warps_.clear();
+    resident_blocks_.clear();
+    allocated_blocks_ = 0;
+    allocated_warps_ = 0;
+    allocated_threads_ = 0;
+    allocated_registers_ = 0;
+    allocated_shared_memory_ = 0;
+}
+
+bool SM::can_admit(const ThreadBlock& block, const SystemConfig& config, const KernelResourceRequirements& req) const {
+    if (allocated_blocks_ + 1 > config.max_blocks_per_sm) return false;
+    
+    size_t block_warps = block.get_warps().size();
+    size_t block_threads = 0;
+    for (const auto& w : block.get_warps()) {
+        block_threads += w.get_threads().size();
+    }
+    
+    size_t regs_needed = block_threads * req.registers_per_thread;
+    size_t shmem_needed = req.shared_memory_per_block;
+    
+    size_t max_warps_per_sm = config.max_warps_per_sm;
+    if (allocated_warps_ + block_warps > max_warps_per_sm) return false;
+    if (allocated_threads_ + block_threads > config.max_threads_per_sm) return false;
+    if (allocated_registers_ + regs_needed > config.max_registers_per_sm) return false;
+    if (allocated_shared_memory_ + shmem_needed > config.max_shared_memory_per_sm) return false;
+    
+    return true;
+}
+
+void SM::allocate_block(const ThreadBlock& block, const SystemConfig& config, const KernelResourceRequirements& req) {
+    (void)config;
+    size_t block_warps = block.get_warps().size();
+    size_t block_threads = 0;
+    for (const auto& w : block.get_warps()) {
+        block_threads += w.get_threads().size();
+    }
+    size_t regs_needed = block_threads * req.registers_per_thread;
+    size_t shmem_needed = req.shared_memory_per_block;
+    
+    allocated_blocks_++;
+    allocated_warps_ += block_warps;
+    allocated_threads_ += block_threads;
+    allocated_registers_ += regs_needed;
+    allocated_shared_memory_ += shmem_needed;
+    
+    resident_blocks_.push_back({block.get_block_id(), block_threads, block_warps, regs_needed, shmem_needed});
+    
+    for (const auto& warp : block.get_warps()) {
+        add_warp(warp);
+    }
+}
+
+void SM::release_completed_blocks() {
+    auto block_it = resident_blocks_.begin();
+    while (block_it != resident_blocks_.end()) {
+        bool all_completed = true;
+        for (const auto& w : warps_) {
+            if (!w.get_threads().empty() && w.get_threads()[0].get_block_id() == block_it->block_id) {
+                if (w.get_state() != WarpState::Completed) {
+                    all_completed = false;
+                    break;
+                }
+            }
+        }
+        
+        if (all_completed) {
+            allocated_blocks_--;
+            allocated_warps_ -= block_it->num_warps;
+            allocated_threads_ -= block_it->num_threads;
+            allocated_registers_ -= block_it->allocated_registers;
+            allocated_shared_memory_ -= block_it->allocated_shared_memory;
+            
+            warps_.erase(std::remove_if(warps_.begin(), warps_.end(),
+                [&](const Warp& w) {
+                    return !w.get_threads().empty() && w.get_threads()[0].get_block_id() == block_it->block_id;
+                }), warps_.end());
+            
+            block_it = resident_blocks_.erase(block_it);
+        } else {
+            ++block_it;
+        }
+    }
 }
 
 void SM::tick(const Kernel& kernel, MemorySystem& memory) {
@@ -114,30 +197,26 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
         handle_barrier_arrival(*selected_warp);
     }
 
-    // 5. Update PC - Minimum PC of all non-completed/active threads
-    // Note: Active threads are represented implicitly by threads whose PC remains within the kernel instruction stream.
-    size_t min_pc = SIZE_MAX;
-    for (const auto& thread : selected_warp->get_threads()) {
-        if (thread.pc() < 0) {
-            throw std::runtime_error("Invariant violation: thread PC is negative.");
-        }
-        size_t tpc = static_cast<size_t>(thread.pc());
-        if (tpc < kernel.instructions().size()) {
-            if (tpc < min_pc) {
-                min_pc = tpc;
+    // 5. Update Warp State
+    if (selected_warp->get_warp_pc() >= kernel.instructions().size()) {
+        SIMTStackEntry next_path;
+        if (selected_warp->pop_simt_stack(next_path)) {
+            selected_warp->set_active_mask(next_path.active_mask);
+            selected_warp->set_warp_pc(next_path.target_pc);
+            selected_warp->set_reconvergence_pc(next_path.reconvergence_pc);
+            
+            // Update shadow PCs for the popped path
+            for (size_t i = 0; i < selected_warp->get_threads().size(); ++i) {
+                if (next_path.active_mask.test(i)) {
+                    selected_warp->get_threads()[i].set_pc(next_path.target_pc);
+                }
             }
-        } else if (tpc > kernel.instructions().size()) {
-            throw std::runtime_error("Invariant violation: thread PC jumped beyond kernel bounds.");
-        }
-    }
-
-    if (min_pc == SIZE_MAX) {
-        selected_warp->set_warp_pc(kernel.instructions().size());
-        if (selected_warp->get_state() != WarpState::StalledAtBarrier) {
-            selected_warp->set_completed();
+        } else {
+            if (selected_warp->get_state() != WarpState::StalledAtBarrier) {
+                selected_warp->set_completed();
+            }
         }
     } else {
-        selected_warp->set_warp_pc(min_pc);
         if (result.status != ExecutionStatus::BarrierReached && result.latency > 1) {
             selected_warp->stall(result.latency - 1);
         }

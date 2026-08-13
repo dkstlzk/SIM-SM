@@ -240,6 +240,7 @@ void run_cache_experiment(const std::string& name, const SystemConfig& config, s
 }
 
 sim_sm::Kernel generate_gemm_kernel(int M, int N, int K, int tile_size) {
+    (void)M; (void)N; (void)K; (void)tile_size;
     std::vector<sim_sm::Instruction> insts;
 
     // Format: {Opcode, dst, src1, src2, imm}
@@ -625,6 +626,9 @@ sim_sm::Kernel generate_reduction_kernel(int block_size) {
     for (int stride = block_size / 2; stride > 0; stride /= 2) {
         int active_reg = 20 + step;
 
+        int ssy_idx = insts.size();
+        insts.push_back({sim_sm::Opcode::SSY, -1, -1, -1, 0}); // Set Sync
+
         insts.push_back({sim_sm::Opcode::CMP, -1, active_reg, 19, 0}); // CMP R_active, 0
         int branch_inst_idx = insts.size();
         insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});      // BRANCH if active == 0
@@ -639,14 +643,19 @@ sim_sm::Kernel generate_reduction_kernel(int block_size) {
         insts.push_back({sim_sm::Opcode::ADD, 12, 10, 11, 0});          // R12 = R10 + R11
         insts.push_back({sim_sm::Opcode::STORE, -1, 12, 1, 0});         // shared_mem[R1] = R12
 
-        int skip_adding_label = insts.size();
-        insts[branch_inst_idx].immediate = skip_adding_label - branch_inst_idx;
+        int sync_label = insts.size();
+        insts[branch_inst_idx].immediate = sync_label - branch_inst_idx;
+        insts[ssy_idx].immediate = sync_label - ssy_idx;
 
+        insts.push_back({sim_sm::Opcode::SYNC, 0, 0, 0, 0});
         insts.push_back({sim_sm::Opcode::BARRIER, 0, 0, 0, 0});
         step++;
     }
 
     // 4. Thread 0 writes to global output
+    int final_ssy = insts.size();
+    insts.push_back({sim_sm::Opcode::SSY, -1, -1, -1, 0});
+    
     insts.push_back({sim_sm::Opcode::CMP, -1, 3, 19, 0}); // CMP R3(is_thread_0), 0
     int final_branch = insts.size();
     insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
@@ -655,8 +664,11 @@ sim_sm::Kernel generate_reduction_kernel(int block_size) {
     insts.push_back({sim_sm::Opcode::LOAD, 10, 1, -1, 0}); // R10 = shared_mem[R1]
     insts.push_back({sim_sm::Opcode::STORE, -1, 10, 2, 0});// global_out[R2] = R10
 
-    int end_label = insts.size();
-    insts[final_branch].immediate = end_label - final_branch;
+    int final_sync_label = insts.size();
+    insts[final_branch].immediate = final_sync_label - final_branch;
+    insts[final_ssy].immediate = final_sync_label - final_ssy;
+    
+    insts.push_back({sim_sm::Opcode::SYNC, 0, 0, 0, 0});
 
     return sim_sm::Kernel("reduction", insts);
 }
@@ -679,6 +691,9 @@ sim_sm::Kernel generate_histogram_kernel(int num_bins, int block_size) {
     insts.push_back({sim_sm::Opcode::MOV, 12, -1, -1, 4});
 
     for (int i = 0; i < iters; ++i) {
+        int ssy_idx = insts.size();
+        insts.push_back({sim_sm::Opcode::SSY, -1, -1, -1, 0}); // Set Sync
+
         insts.push_back({sim_sm::Opcode::CMP, -1, 20 + i, 19, 0}); // predicate = (valid == 0)
         int skip_branch = insts.size();
         insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
@@ -690,12 +705,19 @@ sim_sm::Kernel generate_histogram_kernel(int num_bins, int block_size) {
         insts.push_back({sim_sm::Opcode::ADD, 14, 1, 13, 0});  // R14 = shared_base + R13
         insts.push_back({sim_sm::Opcode::STORE, -1, 19, 14, 0});// shared[R14] = 0
 
-        insts[skip_branch].immediate = insts.size() - skip_branch;
+        int sync_label = insts.size();
+        insts[skip_branch].immediate = sync_label - skip_branch;
+        insts[ssy_idx].immediate = sync_label - ssy_idx;
+
+        insts.push_back({sim_sm::Opcode::SYNC, 0, 0, 0, 0});
     }
 
     insts.push_back({sim_sm::Opcode::BARRIER, 0, 0, 0, 0});
 
     // 2. Load input, increment shared bin
+    int hist_ssy = insts.size();
+    insts.push_back({sim_sm::Opcode::SSY, -1, -1, -1, 0});
+
     insts.push_back({sim_sm::Opcode::CMP, -1, 4, 19, 0}); // predicate = (is_active == 0)
     int skip_hist_branch = insts.size();
     insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
@@ -710,11 +732,16 @@ sim_sm::Kernel generate_histogram_kernel(int num_bins, int block_size) {
 
     int after_hist = insts.size();
     insts[skip_hist_branch].immediate = after_hist - skip_hist_branch;
-
+    insts[hist_ssy].immediate = after_hist - hist_ssy;
+    
+    insts.push_back({sim_sm::Opcode::SYNC, 0, 0, 0, 0});
     insts.push_back({sim_sm::Opcode::BARRIER, 0, 0, 0, 0});
 
     // 3. Write shared bins to global output
     for (int i = 0; i < iters; ++i) {
+        int ssy_idx = insts.size();
+        insts.push_back({sim_sm::Opcode::SSY, -1, -1, -1, 0});
+
         insts.push_back({sim_sm::Opcode::CMP, -1, 20 + i, 19, 0}); // predicate = (valid == 0)
         int skip_branch = insts.size();
         insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
@@ -730,7 +757,11 @@ sim_sm::Kernel generate_histogram_kernel(int num_bins, int block_size) {
         insts.push_back({sim_sm::Opcode::ADD, 18, 2, 13, 0});  // R18 = global_out_base + R13
         insts.push_back({sim_sm::Opcode::STORE, -1, 17, 18, 0});// global[R18] = R17
 
-        insts[skip_branch].immediate = insts.size() - skip_branch;
+        int sync_label = insts.size();
+        insts[skip_branch].immediate = sync_label - skip_branch;
+        insts[ssy_idx].immediate = sync_label - ssy_idx;
+
+        insts.push_back({sim_sm::Opcode::SYNC, 0, 0, 0, 0});
     }
 
     return sim_sm::Kernel("histogram", insts);

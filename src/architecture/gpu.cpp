@@ -16,22 +16,26 @@ GPU::GPU(size_t num_sms, size_t l1_sets, size_t l1_assoc, size_t l2_sets, size_t
 }
 
 void GPU::launch_kernel(const Kernel& kernel, const Grid& grid, const SystemConfig& config, const KernelResourceRequirements& req) {
-    OccupancyResult occ = OccupancyCalculator::compute(config, req);
-    resident_blocks_per_sm_ = occ.resident_blocks;
+    (void)kernel;
+    config_ = config;
+    req_ = req;
     pending_blocks_ = grid.get_blocks();
     current_block_idx_ = 0;
 
     // Initial dispatch
     for (auto& sm : sms_) {
         sm.clear_warps();
-        size_t blocks_added = 0;
-        while (blocks_added < resident_blocks_per_sm_ && current_block_idx_ < pending_blocks_.size()) {
+        while (current_block_idx_ < pending_blocks_.size()) {
             const auto& block = pending_blocks_[current_block_idx_];
-            for (const auto& warp : block.get_warps()) {
-                sm.add_warp(warp);
+            if (sm.can_admit(block, config_, req_)) {
+                sm.allocate_block(block, config_, req_);
+                current_block_idx_++;
+            } else {
+                if (sm.get_allocated_blocks() == 0) {
+                    throw std::runtime_error("Architecturally impossible block: exceeds empty SM limits.");
+                }
+                break; // SM is full
             }
-            blocks_added++;
-            current_block_idx_++;
         }
     }
 }
@@ -41,20 +45,19 @@ void GPU::run_to_completion(const Kernel& kernel) {
     while (!all_done) {
         all_done = true;
 
-        // Phase 1: Load new blocks into empty SMs
+        // Phase 1: Try to load new blocks into SMs that have available resources
         for (auto& sm : sms_) {
-            if (sm.is_completed()) {
-                if (current_block_idx_ < pending_blocks_.size()) {
-                    sm.clear_warps();
-                    size_t blocks_added = 0;
-                    while (blocks_added < resident_blocks_per_sm_ && current_block_idx_ < pending_blocks_.size()) {
-                        const auto& block = pending_blocks_[current_block_idx_];
-                        for (const auto& warp : block.get_warps()) {
-                            sm.add_warp(warp);
-                        }
-                        blocks_added++;
-                        current_block_idx_++;
+            sm.release_completed_blocks();
+            while (current_block_idx_ < pending_blocks_.size()) {
+                const auto& block = pending_blocks_[current_block_idx_];
+                if (sm.can_admit(block, config_, req_)) {
+                    sm.allocate_block(block, config_, req_);
+                    current_block_idx_++;
+                } else {
+                    if (sm.get_allocated_blocks() == 0) {
+                        throw std::runtime_error("Architecturally impossible block: exceeds empty SM limits.");
                     }
+                    break;
                 }
             }
         }
