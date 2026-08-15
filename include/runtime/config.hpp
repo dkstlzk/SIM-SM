@@ -28,6 +28,11 @@ struct SystemConfig {
     size_t l2_line_size = 32;
     std::string l2_policy = "LRU";
 
+    // Scheduling
+    std::string scheduler_policy = "RR";
+    size_t active_set_size = 8;
+
+
     // Latencies
     size_t shared_memory_latency = 1;
     size_t l1_latency = 5;

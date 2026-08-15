@@ -502,6 +502,13 @@ TEST(MemoryTest, CustomBankCount) {
 
 TEST(MemoryTest, CustomGlobalMemorySize) {
     sim_sm::SystemConfig config;
+    config.num_sms = 1;
+    config.warp_size = 32;
+    config.block_size = 256;
+    config.max_threads_per_sm = 2048;
+    config.max_blocks_per_sm = 32;
+    config.max_shared_memory_per_sm = 49152;
+    config.max_registers_per_sm = 65536;
     config.global_memory_size = 500000;
     
     // The GPU should successfully instantiate the global memory with the configured size.

@@ -49,6 +49,18 @@ public:
     void add_dirty_eviction_writebacks(size_t count);
     size_t get_dirty_eviction_writebacks() const;
 
+    // Scheduler Metrics
+    void record_warp_wait(size_t wait_cycles);
+    void initialize_warp_issue_count(size_t warp_id);
+    void record_warp_issue(size_t warp_id);
+    void record_starvation_event();
+    double get_jains_fairness_index() const;
+    double get_average_warp_wait_cycles() const;
+    size_t get_max_warp_wait_cycles() const;
+    size_t get_starvation_events() const;
+    size_t get_warp_wait_events() const;
+    size_t get_total_warp_wait_cycles() const;
+    
     // Trace hooks
     void set_trace_logger(TraceLogger* logger);
     void record_scheduler_event(size_t sm_id, size_t cycle, const std::string& scheduler_name, size_t selected_warp_id, const std::vector<Warp>& warps);
@@ -65,6 +77,12 @@ private:
 
     size_t bank_conflict_stalls_{0};
     size_t dirty_eviction_writebacks_{0};
+    
+    size_t total_warp_wait_cycles_{0};
+    size_t max_warp_wait_cycles_{0};
+    size_t warp_wait_events_{0};
+    size_t starvation_events_{0};
+    std::map<size_t, size_t> warp_issue_counts_;
 
     TraceLogger* trace_logger_{nullptr};
 };

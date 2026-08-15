@@ -4,6 +4,7 @@
 #include "architecture/occupancy.hpp"
 #include "memory/memory_system.hpp"
 #include "runtime/trace_logger.hpp"
+#include "scheduling/scheduler_factory.hpp"
 #include <iostream>
 
 namespace sim_sm {
@@ -12,6 +13,7 @@ GPU::GPU(const SystemConfig& config)
     : config_(config), l2_cache_(config.l2_sets, config.l2_associativity, config.l2_line_size, config.l2_policy), global_memory_(config.global_memory_size) {
     for (size_t i = 0; i < config.num_sms; ++i) {
         sms_.emplace_back(i, config);
+        sms_.back().set_scheduler(SchedulerFactory::create_scheduler(config));
     }
 }
 

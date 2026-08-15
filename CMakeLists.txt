@@ -52,9 +52,13 @@ set(EXECUTION_SOURCES
 )
 
 set(SCHEDULING_SOURCES
-    src/scheduling/greedy_scheduler.cpp
     src/scheduling/round_robin_scheduler.cpp
+    src/scheduling/greedy_scheduler.cpp
     src/scheduling/priority_scheduler.cpp
+    src/scheduling/scheduler_factory.cpp
+    src/scheduling/oldest_first_scheduler.cpp
+    src/scheduling/gto_scheduler.cpp
+    src/scheduling/two_level_scheduler.cpp
 )
 
 set(RUNTIME_SOURCES

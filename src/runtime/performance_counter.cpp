@@ -70,6 +70,53 @@ size_t PerformanceCounter::get_warp_barrier_stall_cycles() const {
     return warp_barrier_stall_cycles_;
 }
 
+void PerformanceCounter::record_warp_wait(size_t wait_cycles) {
+    total_warp_wait_cycles_ += wait_cycles;
+    if (wait_cycles > max_warp_wait_cycles_) {
+        max_warp_wait_cycles_ = wait_cycles;
+    }
+    if (wait_cycles > 0) {
+        warp_wait_events_++;
+    }
+}
+
+void PerformanceCounter::record_starvation_event() {
+    starvation_events_++;
+}
+
+void PerformanceCounter::initialize_warp_issue_count(size_t warp_id) {
+    if (warp_issue_counts_.find(warp_id) == warp_issue_counts_.end()) {
+        warp_issue_counts_[warp_id] = 0;
+    }
+}
+
+void PerformanceCounter::record_warp_issue(size_t warp_id) {
+    warp_issue_counts_[warp_id]++;
+}
+
+double PerformanceCounter::get_jains_fairness_index() const {
+    if (warp_issue_counts_.empty()) return 0.0;
+    double sum = 0.0;
+    double sum_sq = 0.0;
+    for (const auto& pair : warp_issue_counts_) {
+        sum += pair.second;
+        sum_sq += pair.second * pair.second;
+    }
+    if (sum_sq == 0.0) return 0.0; // Avoid divide by zero if no issues happened at all
+    double n = warp_issue_counts_.size();
+    return (sum * sum) / (n * sum_sq);
+}
+
+double PerformanceCounter::get_average_warp_wait_cycles() const {
+    if (warp_wait_events_ == 0) return 0.0;
+    return static_cast<double>(total_warp_wait_cycles_) / warp_wait_events_;
+}
+
+size_t PerformanceCounter::get_max_warp_wait_cycles() const { return max_warp_wait_cycles_; }
+size_t PerformanceCounter::get_starvation_events() const { return starvation_events_; }
+size_t PerformanceCounter::get_warp_wait_events() const { return warp_wait_events_; }
+size_t PerformanceCounter::get_total_warp_wait_cycles() const { return total_warp_wait_cycles_; }
+
 void PerformanceCounter::set_trace_logger(TraceLogger* logger) {
     trace_logger_ = logger;
 }

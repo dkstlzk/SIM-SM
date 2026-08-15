@@ -128,23 +128,19 @@ void run_experiment(const std::string& name, const SystemConfig& config,
 
     std::filesystem::create_directories("results");
     std::ofstream out("results/" + name + ".csv");
-    out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT\n";
+    out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT,NoReadyWarpCycles,AvgWarpWait,MaxWarpWait,Starvation,Fairness\n";
 
     SystemConfig gpu_config = config;
     gpu_config.l1_sets = l1_sets;
     gpu_config.l1_associativity = l1_assoc;
+    // Map legacy names or just pass them through
+    if (scheduler_type == "rr") gpu_config.scheduler_policy = "RR";
+    else if (scheduler_type == "greedy") gpu_config.scheduler_policy = "Greedy";
+    else if (scheduler_type == "priority") gpu_config.scheduler_policy = "Priority";
+    else gpu_config.scheduler_policy = scheduler_type;
+
     sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
-
-    for (auto& sm : gpu.get_sms()) {
-        if (scheduler_type == "greedy") {
-            sm.set_scheduler(std::make_unique<sim_sm::GreedyScheduler>());
-        } else if (scheduler_type == "priority") {
-            sm.set_scheduler(std::make_unique<sim_sm::PriorityScheduler>());
-        } else {
-            sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
-        }
-    }
 
     size_t num_threads = 2048;
     sim_sm::KernelResourceRequirements req = {10, 0};
@@ -191,12 +187,34 @@ void run_experiment(const std::string& name, const SystemConfig& config,
     double amat = config.l1_latency + (l1_miss_rate * (config.l2_latency + l2_miss_rate * config.global_memory_latency)) +
                   ((l1_hits + l1_misses > 0) ? ((double)dirty_evicts / (l1_hits + l1_misses) * config.writeback_latency) : 0.0);
 
+    size_t scheduler_idle = 0;
+    double avg_warp_wait = 0.0;
+    size_t max_warp_wait = 0;
+    size_t starvation = 0;
+    double fairness = 0.0;
+    for (const auto& sm : gpu.get_sms()) {
+        const auto& c = sm.get_counters();
+        scheduler_idle += c.get_stalls(sim_sm::StallReason::NoReadyWarp);
+        max_warp_wait = std::max(max_warp_wait, c.get_max_warp_wait_cycles());
+        starvation += c.get_starvation_events();
+        fairness += c.get_jains_fairness_index();
+        avg_warp_wait += c.get_average_warp_wait_cycles();
+    }
+    if (gpu.get_sms().size() > 0) {
+        fairness /= gpu.get_sms().size();
+        avg_warp_wait /= gpu.get_sms().size();
+    }
+
     out << name << "," << config.num_sms << "," << max_cycles << ","
         << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
         << total_mem_insts << "," << total_mem_txns << ","
         << occ.occupancy_percentage << "," << occ.resident_blocks << ","
         << l1_hits << "," << l1_misses << "," << l2_hits << "," << l2_misses << ","
-        << dirty_evicts << "," << bank_conflicts << "," << amat << "\n";
+        << dirty_evicts << "," << bank_conflicts << "," << amat << ","
+        << scheduler_idle << ","
+        << std::fixed << std::setprecision(2) << avg_warp_wait << ","
+        << max_warp_wait << "," << starvation << ","
+        << std::fixed << std::setprecision(4) << fairness << "\n";
     out.close();
 }
 
@@ -219,7 +237,7 @@ void run_cache_experiment(const std::string& name, const SystemConfig& config, s
     sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
-        sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
+        // Scheduler is now set in the GPU constructor via SchedulerFactory
     }
 
     size_t num_threads = 64;
@@ -459,7 +477,7 @@ void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int
     sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
-        sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
+        // Scheduler is now set in the GPU constructor via SchedulerFactory
     }
 
     sim_sm::GlobalMemory& gm = gpu.get_global_memory();
@@ -580,7 +598,7 @@ void run_memcpy_benchmark(const std::string& name, const SystemConfig& config, s
     sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
-        sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
+        // Scheduler is now set in the GPU constructor via SchedulerFactory
     }
 
     sim_sm::GlobalMemory& gm = gpu.get_global_memory();
@@ -948,7 +966,7 @@ void run_reduction_benchmark(const std::string& name, const SystemConfig& config
     sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
-        sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
+        // Scheduler is now set in the GPU constructor via SchedulerFactory
     }
 
     sim_sm::GlobalMemory& gm = gpu.get_global_memory();
@@ -1051,7 +1069,7 @@ void run_histogram_benchmark(const std::string& name, const SystemConfig& config
     sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
-        sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
+        // Scheduler is now set in the GPU constructor via SchedulerFactory
     }
 
     sim_sm::GlobalMemory& gm = gpu.get_global_memory();
@@ -1212,6 +1230,10 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type, b
     if (run_basic) {
         run_experiment("scheduler_rr", base_config, "rr", false, 4, 4, logger.get());
         run_experiment("scheduler_greedy", base_config, "greedy", false, 4, 4, logger.get());
+        run_experiment("scheduler_oldest_first", base_config, "OldestFirst", false, 4, 4, logger.get());
+        run_experiment("scheduler_gto", base_config, "GTO", false, 4, 4, logger.get());
+        run_experiment("scheduler_two_level", base_config, "TwoLevel", false, 4, 4, logger.get());
+        
         // By user request, scheduler_priority.csv is generated alongside basic so it's comparable
         if (!run_priority) {
             run_experiment("scheduler_priority", base_config, "priority", false, 4, 4, logger.get());

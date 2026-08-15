@@ -75,14 +75,16 @@ void Warp::stall(size_t cycles) {
     if (cycles > 0) {
         stall_cycles_remaining_ = cycles;
         state_ = WarpState::Stalled;
+        reset_wait_cycles();
     }
 }
 
-void Warp::tick_stall() {
+void Warp::tick_stall(size_t current_cycle) {
     if (state_ == WarpState::Stalled && stall_cycles_remaining_ > 0) {
         stall_cycles_remaining_--;
         if (stall_cycles_remaining_ == 0) {
             state_ = WarpState::Ready;
+            ready_since_cycle_ = current_cycle;
         }
     }
 }
@@ -93,10 +95,14 @@ void Warp::set_completed() {
 
 void Warp::set_stalled_at_barrier() {
     state_ = WarpState::StalledAtBarrier;
+    reset_wait_cycles();
 }
 
-void Warp::set_ready() {
-    state_ = WarpState::Ready;
+void Warp::set_ready(size_t current_cycle) {
+    if (state_ != WarpState::Ready) {
+        state_ = WarpState::Ready;
+        ready_since_cycle_ = current_cycle;
+    }
 }
 
 int Warp::get_priority() const {
@@ -105,6 +111,31 @@ int Warp::get_priority() const {
 
 void Warp::set_priority(int priority) {
     priority_ = priority;
+}
+
+size_t Warp::get_ready_since_cycle() const {
+    return ready_since_cycle_;
+}
+
+size_t Warp::get_wait_cycles() const {
+    return current_wait_cycles_;
+}
+
+void Warp::increment_wait_cycles() {
+    current_wait_cycles_++;
+}
+
+void Warp::reset_wait_cycles() {
+    current_wait_cycles_ = 0;
+    starvation_recorded_ = false;
+}
+
+bool Warp::check_and_set_starvation() {
+    if (!starvation_recorded_ && current_wait_cycles_ > 1000) {
+        starvation_recorded_ = true;
+        return true;
+    }
+    return false;
 }
 
 } // namespace sim_sm

@@ -102,6 +102,7 @@ void SM::allocate_block(const ThreadBlock& block, const SystemConfig& config, co
     
     for (const auto& warp : block.get_warps()) {
         add_warp(warp);
+        counters_.initialize_warp_issue_count(warp.get_warp_id());
     }
 }
 
@@ -142,10 +143,12 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
         return;
     }
 
+    size_t current_cycle = counters_.get_cycles();
+    
     // 1. Tick stalled warps
     size_t barrier_stalls = 0;
     for (auto& warp : warps_) {
-        warp.tick_stall();
+        warp.tick_stall(current_cycle);
         if (warp.get_state() == WarpState::StalledAtBarrier) {
             barrier_stalls++;
         }
@@ -156,6 +159,7 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
     }
 
     counters_.increment_cycles();
+    current_cycle = counters_.get_cycles();
 
     // 2. Select warp
     if (!scheduler_) {
@@ -165,7 +169,26 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
 
     Warp* selected_warp = scheduler_->select_warp(warps_);
     
-    counters_.record_scheduler_event(sm_id_, counters_.get_cycles(), scheduler_->name(), selected_warp ? selected_warp->get_warp_id() : -1, warps_);
+    // Wait-cycle accounting
+    for (auto& warp : warps_) {
+        if (warp.get_state() == WarpState::Ready) {
+            if (selected_warp && warp.get_warp_id() == selected_warp->get_warp_id()) {
+                counters_.record_warp_wait(warp.get_wait_cycles());
+                warp.reset_wait_cycles();
+            } else {
+                warp.increment_wait_cycles();
+                if (warp.check_and_set_starvation()) {
+                    counters_.record_starvation_event();
+                }
+            }
+        }
+    }
+
+    if (selected_warp) {
+        counters_.record_warp_issue(selected_warp->get_warp_id());
+    }
+
+    counters_.record_scheduler_event(sm_id_, current_cycle, scheduler_->name(), selected_warp ? selected_warp->get_warp_id() : -1, warps_);
 
     if (!selected_warp) {
         // Differentiate stall reason: if warps exist but none ready, they are likely stalled on synthetic latency.
@@ -266,7 +289,7 @@ void SM::handle_barrier_arrival(Warp& warp) {
         for (auto& w : warps_) {
             if (!w.get_threads().empty() && w.get_threads()[0].get_block_id() == block_id) {
                 if (w.get_state() == WarpState::StalledAtBarrier) {
-                    w.set_ready();
+                    w.set_ready(counters_.get_cycles());
                 }
             }
         }

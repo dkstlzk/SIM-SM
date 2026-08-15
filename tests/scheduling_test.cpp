@@ -5,6 +5,9 @@
 #include "scheduling/greedy_scheduler.hpp"
 #include "scheduling/round_robin_scheduler.hpp"
 #include "scheduling/priority_scheduler.hpp"
+#include "scheduling/oldest_first_scheduler.hpp"
+#include "scheduling/gto_scheduler.hpp"
+#include "scheduling/two_level_scheduler.hpp"
 #include "memory/memory_system.hpp"
 #include "memory/cache.hpp"
 #include "memory/shared_memory.hpp"
@@ -202,6 +205,116 @@ TEST_F(SchedulingTest, PrioritySchedulerUnit) {
     // Stall warp 2, next is warp 0 (prio 5)
     warps[2].stall(5);
     EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0);
+
+    // Tie breaker
+    warps[0].set_priority(10);
+    warps[1].set_priority(10);
+    warps[2].set_priority(10);
+
+    // All same prio, falls back to round-robin from next_warp_index_
+    warps[0].set_ready(0);
+    warps[1].set_ready(0);
+    warps[2].set_ready(0);
+
+    // After warp 0 was selected, next is 1
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
+}
+
+TEST_F(SchedulingTest, OldestFirstSchedulerUnit) {
+    std::vector<Warp> warps;
+    warps.emplace_back(0);
+    warps.emplace_back(1);
+    warps.emplace_back(2);
+
+    // Initialize all to same ready cycle
+    warps[0].set_ready(0);
+    warps[1].set_ready(0);
+    warps[2].set_ready(0);
+
+    OldestFirstScheduler scheduler;
+
+    // Tie-breaker: smallest warp_id (0)
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0);
+
+    // Make 2 stall then ready at cycle 10
+    warps[2].stall(1);
+    warps[2].set_ready(10);
+    
+    // Make 0 stall then ready at cycle 8
+    warps[0].stall(1);
+    warps[0].set_ready(8);
+    
+    // Make 1 stall then ready at cycle 15
+    warps[1].stall(1);
+    warps[1].set_ready(15);
+
+    // Oldest is 0 (cycle 8), then 2 (cycle 10), then 1 (cycle 15)
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0);
+    warps[0].stall(5);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
+}
+
+TEST_F(SchedulingTest, GTOSchedulerUnit) {
+    std::vector<Warp> warps;
+    warps.emplace_back(0);
+    warps.emplace_back(1);
+    warps.emplace_back(2);
+
+    warps[0].stall(1);
+    warps[0].set_ready(10);
+    warps[1].stall(1);
+    warps[1].set_ready(8);
+    warps[2].stall(1);
+    warps[2].set_ready(5);
+
+    GTOScheduler scheduler;
+
+    // No last-issued, fallback to oldest: warp 2 (cycle 5)
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
+    
+    // Warp 2 remains ready, should be selected again
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
+    
+    // Warp 2 stalls, fallback to oldest of remainder: warp 1 (cycle 8)
+    warps[2].stall(5);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
+
+    // Warp 1 completes, fallback to oldest of remainder: warp 0 (cycle 10)
+    warps[1].set_completed();
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0);
+}
+
+TEST_F(SchedulingTest, TwoLevelSchedulerUnit) {
+    std::vector<Warp> warps;
+    for (int i = 0; i < 6; ++i) {
+        warps.emplace_back(i);
+        warps[i].set_ready(0);
+    }
+
+    TwoLevelScheduler scheduler(4); // active set size 4
+
+    // The active set will be {0, 1, 2, 3}. Inner is RR.
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 2);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 3);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 0); // Wrap around active set
+
+    // Stall 0, should select 1
+    warps[0].stall(5);
+    EXPECT_EQ(scheduler.select_warp(warps)->get_warp_id(), 1);
+
+    // 0 is stalled, but still in active set. 4 and 5 are pending.
+    // Make 1 complete, 4 should enter active set, 5 should remain outside.
+    warps[1].set_completed();
+    
+    // Repeatedly schedule and verify 5 is never selected
+    for (int j = 0; j < 10; ++j) {
+        Warp* selected = scheduler.select_warp(warps);
+        if (selected) {
+            EXPECT_NE(selected->get_warp_id(), 5);
+        }
+    }
 }
 
 TEST_F(SchedulingTest, PrioritySchedulerTieBreaker) {

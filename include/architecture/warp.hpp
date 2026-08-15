@@ -45,13 +45,19 @@ public:
     bool is_simt_stack_empty() const;
 
     void stall(size_t cycles);
-    void tick_stall();
+    void tick_stall(size_t current_cycle);
     void set_completed();
     void set_stalled_at_barrier();
-    void set_ready();
+    void set_ready(size_t current_cycle);
 
     int get_priority() const;
     void set_priority(int priority);
+
+    size_t get_ready_since_cycle() const;
+    size_t get_wait_cycles() const;
+    void increment_wait_cycles();
+    void reset_wait_cycles();
+    bool check_and_set_starvation();
 
 private:
     size_t warp_id_;
@@ -60,6 +66,10 @@ private:
     size_t warp_pc_{0};
     size_t stall_cycles_remaining_{0};
     int priority_{0};
+
+    size_t ready_since_cycle_{0};
+    size_t current_wait_cycles_{0};
+    bool starvation_recorded_{false};
 
     std::bitset<32> active_mask_{0};
     size_t reconvergence_pc_{static_cast<size_t>(-1)};
