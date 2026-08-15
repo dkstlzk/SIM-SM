@@ -19,6 +19,8 @@ struct ExecutionResult {
     size_t memory_transactions = 0;
     std::string memory_space = "";
     size_t write_conflict_stalls = 0;
+    size_t bank_conflicts = 0;
+    size_t dirty_evictions = 0;
 };
 
 class InstructionExecutor {

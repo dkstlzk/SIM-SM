@@ -10,6 +10,8 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
     size_t memory_transactions = 0;
     std::string memory_space = "";
     size_t write_conflict_stalls = 0;
+    size_t bank_conflicts = 0;
+    size_t dirty_evictions = 0;
 
     size_t warp_pc = warp.get_warp_pc();
     std::bitset<32> active_mask = warp.get_active_mask();
@@ -95,6 +97,8 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
                 WarpMemoryResult res = memory.warp_load(addresses, out_values);
                 max_latency = res.total_latency;
                 memory_transactions = res.num_transactions;
+                bank_conflicts = res.bank_conflict_stalls;
+                dirty_evictions = res.dirty_eviction_writebacks;
 
                 for (size_t k = 0; k < active_indices.size(); ++k) {
                     size_t thread_idx = active_indices[k];
@@ -136,6 +140,8 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
                 WarpMemoryResult res = memory.warp_store(addresses, values);
                 max_latency = res.total_latency;
                 memory_transactions = res.num_transactions;
+                bank_conflicts = res.bank_conflict_stalls;
+                dirty_evictions = res.dirty_eviction_writebacks;
 
                 if (max_collisions > 1) {
                     write_conflict_stalls = max_collisions - 1;
@@ -177,6 +183,8 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
                 WarpMemoryResult res = memory.warp_atomic_add(addresses, values);
                 max_latency = res.total_latency;
                 memory_transactions = res.num_transactions;
+                bank_conflicts = res.bank_conflict_stalls;
+                dirty_evictions = res.dirty_eviction_writebacks;
 
                 if (max_collisions > 1) {
                     write_conflict_stalls = max_collisions - 1;
@@ -282,7 +290,7 @@ ExecutionResult InstructionExecutor::execute(const Instruction& inst, Warp& warp
             throw std::runtime_error("Unknown opcode");
     }
 
-    return {overall_status, max_latency, memory_transactions, memory_space, write_conflict_stalls};
+    return {overall_status, max_latency, memory_transactions, memory_space, write_conflict_stalls, bank_conflicts, dirty_evictions};
 }
 
 } // namespace sim_sm

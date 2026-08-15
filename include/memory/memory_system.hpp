@@ -14,11 +14,14 @@ struct MemoryAccessConfig {
     size_t l1_latency = 5;
     size_t l2_latency = 20;
     size_t global_memory_latency = 100;
+    size_t writeback_latency = 20;
 };
 
 struct WarpMemoryResult {
     size_t total_latency;
     size_t num_transactions;
+    size_t bank_conflict_stalls = 0;
+    size_t dirty_eviction_writebacks = 0;
 };
 
 class MemorySystem {
@@ -39,7 +42,7 @@ public:
     WarpMemoryResult warp_store(const std::vector<size_t>& addresses, const std::vector<int>& values);
     WarpMemoryResult warp_atomic_add(const std::vector<size_t>& addresses, const std::vector<int>& values);
 
-    // Explicitly access shared memory (not part of the global load/store ISA for Week 1)
+    // Explicitly access shared memory
     size_t shared_load(size_t address, int& out_value);
     size_t shared_store(size_t address, int value);
 
@@ -55,7 +58,8 @@ private:
     GlobalMemory& global_memory_;
     MemoryAccessConfig config_;
 
-    size_t access_latency(size_t address);
+    size_t read_latency(size_t address, size_t& dirty_evictions_out);
+    size_t write_latency(size_t address, size_t& dirty_evictions_out);
 };
 
 } // namespace sim_sm

@@ -26,6 +26,30 @@ SystemConfig load_config(const std::string& filepath) {
     config.max_warps_per_sm = j.value("max_warps_per_sm",
         config.max_threads_per_sm / config.warp_size);
 
+    // Cache hierarchy
+    config.l1_sets = j.value("l1_sets", (size_t)4);
+    config.l1_associativity = j.value("l1_associativity", (size_t)4);
+    config.l1_line_size = j.value("l1_line_size", (size_t)32);
+    config.l1_policy = j.value("l1_policy", std::string("LRU"));
+
+    config.l2_sets = j.value("l2_sets", (size_t)16);
+    config.l2_associativity = j.value("l2_associativity", (size_t)8);
+    config.l2_line_size = j.value("l2_line_size", (size_t)32);
+    config.l2_policy = j.value("l2_policy", std::string("LRU"));
+
+    // Latencies
+    config.shared_memory_latency = j.value("shared_memory_latency", (size_t)1);
+    config.l1_latency = j.value("l1_latency", (size_t)5);
+    config.l2_latency = j.value("l2_latency", (size_t)20);
+    config.global_memory_latency = j.value("global_memory_latency", (size_t)100);
+    config.writeback_latency = j.value("writeback_latency", (size_t)20);
+
+    // Shared memory banking
+    config.shared_memory_banks = j.value("shared_memory_banks", (size_t)32);
+
+    // Global memory size
+    config.global_memory_size = j.value("global_memory_size", (size_t)1048576);
+
     return config;
 }
 

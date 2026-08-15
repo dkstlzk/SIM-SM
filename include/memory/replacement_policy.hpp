@@ -9,6 +9,7 @@ namespace sim_sm {
 struct CacheLine {
     bool valid = false;
     uint64_t tag = 0;
+    bool dirty = false;
 };
 
 class ReplacementPolicy {

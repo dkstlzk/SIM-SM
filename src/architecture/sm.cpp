@@ -6,8 +6,11 @@
 
 namespace sim_sm {
 
+SM::SM(size_t sm_id, const SystemConfig& config)
+    : sm_id_(sm_id), l1_cache_(config.l1_sets, config.l1_associativity, config.l1_line_size, config.l1_policy), shared_memory_(config.max_shared_memory_per_sm, config.shared_memory_banks) {}
+
 SM::SM(size_t sm_id, size_t l1_sets, size_t l1_assoc, size_t l1_line_size, const std::string& cache_policy)
-    : sm_id_(sm_id), l1_cache_(l1_sets, l1_assoc, l1_line_size, cache_policy), shared_memory_(65536) {}
+    : sm_id_(sm_id), l1_cache_(l1_sets, l1_assoc, l1_line_size, cache_policy), shared_memory_(65536, 32) {}
 
 size_t SM::get_sm_id() const {
     return sm_id_;
@@ -187,10 +190,17 @@ void SM::tick(const Kernel& kernel, MemorySystem& memory) {
     // 4. Execute for active threads
     ExecutionResult result = InstructionExecutor::execute(inst, *selected_warp, memory);
 
-    if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::STORE) {
+    if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::STORE || inst.opcode == Opcode::ATOMIC_ADD) {
         counters_.increment_memory_instructions();
         counters_.add_memory_transactions(result.memory_transactions);
         counters_.record_memory_event(sm_id_, counters_.get_cycles(), selected_warp->get_warp_id(), inst, result.memory_transactions, result.memory_space);
+    }
+
+    if (result.bank_conflicts > 0) {
+        counters_.add_bank_conflict_stalls(result.bank_conflicts);
+    }
+    if (result.dirty_evictions > 0) {
+        counters_.add_dirty_eviction_writebacks(result.dirty_evictions);
     }
 
     if (result.status == ExecutionStatus::BarrierReached) {

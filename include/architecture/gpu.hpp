@@ -17,6 +17,7 @@ class TraceLogger;
 
 class GPU {
 public:
+    GPU(const SystemConfig& config);
     GPU(size_t num_sms, size_t l1_sets = 4, size_t l1_assoc = 4, size_t l2_sets = 16, size_t l2_assoc = 8, size_t l2_line_size = 32, size_t global_mem_size = 1048576, const std::string& cache_policy = "LRU");
 
 

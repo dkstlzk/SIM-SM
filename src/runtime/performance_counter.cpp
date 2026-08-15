@@ -86,4 +86,20 @@ void PerformanceCounter::record_memory_event(size_t sm_id, size_t cycle, size_t 
     }
 }
 
+void PerformanceCounter::add_bank_conflict_stalls(size_t count) {
+    bank_conflict_stalls_ += count;
+}
+
+size_t PerformanceCounter::get_bank_conflict_stalls() const {
+    return bank_conflict_stalls_;
+}
+
+void PerformanceCounter::add_dirty_eviction_writebacks(size_t count) {
+    dirty_eviction_writebacks_ += count;
+}
+
+size_t PerformanceCounter::get_dirty_eviction_writebacks() const {
+    return dirty_eviction_writebacks_;
+}
+
 } // namespace sim_sm

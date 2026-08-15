@@ -8,6 +8,13 @@
 
 namespace sim_sm {
 
+GPU::GPU(const SystemConfig& config)
+    : config_(config), l2_cache_(config.l2_sets, config.l2_associativity, config.l2_line_size, config.l2_policy), global_memory_(config.global_memory_size) {
+    for (size_t i = 0; i < config.num_sms; ++i) {
+        sms_.emplace_back(i, config);
+    }
+}
+
 GPU::GPU(size_t num_sms, size_t l1_sets, size_t l1_assoc, size_t l2_sets, size_t l2_assoc, size_t l2_line_size, size_t global_mem_size, const std::string& cache_policy)
     : l2_cache_(l2_sets, l2_assoc, l2_line_size, cache_policy), global_memory_(global_mem_size) {
     for (size_t i = 0; i < num_sms; ++i) {
@@ -65,7 +72,13 @@ void GPU::run_to_completion(const Kernel& kernel) {
         // Phase 2: Tick active SMs
         for (auto& sm : sms_) {
             if (!sm.is_completed()) {
-                MemorySystem mem(sm.get_shared_memory(), sm.get_l1_cache(), l2_cache_, global_memory_);
+                MemorySystem mem(sm.get_shared_memory(), sm.get_l1_cache(), l2_cache_, global_memory_, MemoryAccessConfig{
+                    config_.shared_memory_latency,
+                    config_.l1_latency,
+                    config_.l2_latency,
+                    config_.global_memory_latency,
+                    config_.writeback_latency
+                });
                 sm.tick(kernel, mem);
                 all_done = false;
             }

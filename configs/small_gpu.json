@@ -5,5 +5,20 @@
     "max_threads_per_sm": 2048,
     "max_blocks_per_sm": 32,
     "max_shared_memory_per_sm": 65536,
-    "max_registers_per_sm": 65536
+    "max_registers_per_sm": 65536,
+    "l1_sets": 4,
+    "l1_associativity": 4,
+    "l1_line_size": 32,
+    "l1_policy": "LRU",
+    "l2_sets": 16,
+    "l2_associativity": 8,
+    "l2_line_size": 32,
+    "l2_policy": "LRU",
+    "shared_memory_latency": 1,
+    "l1_latency": 5,
+    "l2_latency": 20,
+    "global_memory_latency": 100,
+    "writeback_latency": 20,
+    "shared_memory_banks": 32,
+    "global_memory_size": 1048576
 }

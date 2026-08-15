@@ -31,8 +31,9 @@ Cache::Cache(size_t num_sets, size_t associativity, size_t line_size, const std:
     }
 }
 
-bool Cache::access(size_t address, size_t cycle) {
+CacheAccessResult Cache::lookup_and_fill(size_t address, bool is_write, size_t cycle) {
     stats_.accesses++;
+    CacheAccessResult result;
 
     size_t line_address = address / line_size_;
     size_t set_index = line_address % num_sets_;
@@ -45,11 +46,15 @@ bool Cache::access(size_t address, size_t cycle) {
     for (size_t way = 0; way < associativity_; ++way) {
         if (set[way].valid && set[way].tag == tag) {
             stats_.hits++;
+            result.hit = true;
+            if (is_write) {
+                set[way].dirty = true;
+            }
             policy->on_access(way);
             if (event_cb_) {
                 event_cb_({cycle, name_, set_index, way, true});
             }
-            return true;
+            return result;
         }
     }
 
@@ -60,17 +65,31 @@ bool Cache::access(size_t address, size_t cycle) {
     size_t victim_way = policy->choose_victim(set);
     if (set[victim_way].valid) {
         stats_.evictions++;
+        result.eviction = true;
+        if (set[victim_way].dirty) {
+            stats_.dirty_evictions++;
+            result.dirty_eviction = true;
+        }
     }
 
     set[victim_way].valid = true;
     set[victim_way].tag = tag;
+    set[victim_way].dirty = is_write;
     policy->on_access(victim_way);
-    
+
     if (event_cb_) {
         event_cb_({cycle, name_, set_index, victim_way, false});
     }
 
-    return false;
+    return result;
+}
+
+CacheAccessResult Cache::access(size_t address, size_t cycle) {
+    return lookup_and_fill(address, false, cycle);
+}
+
+CacheAccessResult Cache::write(size_t address, size_t cycle) {
+    return lookup_and_fill(address, true, cycle);
 }
 
 } // namespace sim_sm

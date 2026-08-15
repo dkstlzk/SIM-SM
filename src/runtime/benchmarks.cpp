@@ -128,9 +128,12 @@ void run_experiment(const std::string& name, const SystemConfig& config,
 
     std::filesystem::create_directories("results");
     std::ofstream out("results/" + name + ".csv");
-    out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM" << "\n";
+    out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT\n";
 
-    sim_sm::GPU gpu(config.num_sms, l1_sets, l1_assoc, 16, 8, 32, 10485760);
+    SystemConfig gpu_config = config;
+    gpu_config.l1_sets = l1_sets;
+    gpu_config.l1_associativity = l1_assoc;
+    sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
 
     for (auto& sm : gpu.get_sms()) {
@@ -159,13 +162,22 @@ void run_experiment(const std::string& name, const SystemConfig& config,
     size_t total_mem_insts = 0;
     size_t total_mem_txns = 0;
 
+    size_t l1_hits = 0, l1_misses = 0;
+    size_t dirty_evicts = 0, bank_conflicts = 0;
     for (const auto& sm : gpu.get_sms()) {
         const auto& c = sm.get_counters();
         total_cycles += c.get_cycles();
         total_insts += c.get_instructions_retired();
         total_mem_insts += c.get_memory_instructions();
         total_mem_txns += c.get_memory_transactions();
+        dirty_evicts += c.get_dirty_eviction_writebacks();
+        bank_conflicts += c.get_bank_conflict_stalls();
+        const auto& l1_stats = sm.get_l1_cache().stats();
+        l1_hits += l1_stats.hits;
+        l1_misses += l1_stats.misses;
     }
+    size_t l2_hits = gpu.get_l2_cache().stats().hits;
+    size_t l2_misses = gpu.get_l2_cache().stats().misses;
 
     size_t max_cycles = 0;
     for (const auto& sm : gpu.get_sms()) {
@@ -174,10 +186,17 @@ void run_experiment(const std::string& name, const SystemConfig& config,
 
     double ipc = (max_cycles > 0) ? (double)total_insts / max_cycles : 0.0;
 
+    double l1_miss_rate = (l1_hits + l1_misses > 0) ? (double)l1_misses / (l1_hits + l1_misses) : 0.0;
+    double l2_miss_rate = (l2_hits + l2_misses > 0) ? (double)l2_misses / (l2_hits + l2_misses) : 0.0;
+    double amat = config.l1_latency + (l1_miss_rate * (config.l2_latency + l2_miss_rate * config.global_memory_latency)) +
+                  ((l1_hits + l1_misses > 0) ? ((double)dirty_evicts / (l1_hits + l1_misses) * config.writeback_latency) : 0.0);
+
     out << name << "," << config.num_sms << "," << max_cycles << ","
         << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
         << total_mem_insts << "," << total_mem_txns << ","
-        << occ.occupancy_percentage << "," << occ.resident_blocks << "\n";
+        << occ.occupancy_percentage << "," << occ.resident_blocks << ","
+        << l1_hits << "," << l1_misses << "," << l2_hits << "," << l2_misses << ","
+        << dirty_evicts << "," << bank_conflicts << "," << amat << "\n";
     out.close();
 }
 
@@ -188,11 +207,16 @@ void run_cache_experiment(const std::string& name, const SystemConfig& config, s
     bool file_exists = std::filesystem::exists("results/" + name + ".csv");
     std::ofstream out("results/" + name + ".csv", std::ios::app);
     if (!file_exists) {
-        out << "Experiment,SMs,Policy,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM\n";
+        out << "Experiment,SMs,Policy,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT\n";
     }
 
-    // 1 SM to isolate cache behavior without inter-SM interference
-    sim_sm::GPU gpu(1, l1_sets, l1_assoc, 16, 8, 32, 10485760, policy);
+    SystemConfig gpu_config = config;
+    gpu_config.num_sms = 1;
+    gpu_config.l1_sets = l1_sets;
+    gpu_config.l1_associativity = l1_assoc;
+    gpu_config.l1_policy = policy;
+    gpu_config.l2_policy = policy;
+    sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -222,20 +246,36 @@ void run_cache_experiment(const std::string& name, const SystemConfig& config, s
     size_t total_mem_insts = 0;
     size_t total_mem_txns = 0;
 
+    size_t l1_hits = 0, l1_misses = 0;
+    size_t dirty_evicts = 0, bank_conflicts = 0;
     for (const auto& sm : gpu.get_sms()) {
         const auto& c = sm.get_counters();
         total_cycles += c.get_cycles();
         total_insts += c.get_instructions_retired();
         total_mem_insts += c.get_memory_instructions();
         total_mem_txns += c.get_memory_transactions();
+        dirty_evicts += c.get_dirty_eviction_writebacks();
+        bank_conflicts += c.get_bank_conflict_stalls();
+        const auto& l1_stats = sm.get_l1_cache().stats();
+        l1_hits += l1_stats.hits;
+        l1_misses += l1_stats.misses;
     }
+    size_t l2_hits = gpu.get_l2_cache().stats().hits;
+    size_t l2_misses = gpu.get_l2_cache().stats().misses;
 
     double ipc = (total_cycles > 0) ? (double)total_insts / total_cycles : 0.0;
+
+    double l1_miss_rate = (l1_hits + l1_misses > 0) ? (double)l1_misses / (l1_hits + l1_misses) : 0.0;
+    double l2_miss_rate = (l2_hits + l2_misses > 0) ? (double)l2_misses / (l2_hits + l2_misses) : 0.0;
+    double amat = config.l1_latency + (l1_miss_rate * (config.l2_latency + l2_miss_rate * config.global_memory_latency)) +
+                  ((l1_hits + l1_misses > 0) ? ((double)dirty_evicts / (l1_hits + l1_misses) * config.writeback_latency) : 0.0);
 
     out << name << "," << 1 << "," << policy << "," << total_cycles << ","
         << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
         << total_mem_insts << "," << total_mem_txns << ","
-        << occ.occupancy_percentage << "," << occ.resident_blocks << "\n";
+        << occ.occupancy_percentage << "," << occ.resident_blocks << ","
+        << l1_hits << "," << l1_misses << "," << l2_hits << "," << l2_misses << ","
+        << dirty_evicts << "," << bank_conflicts << "," << amat << "\n";
     out.close();
 }
 
@@ -413,9 +453,10 @@ sim_sm::Grid build_gemm_grid(int M, int N, int K, int tile_size, int warp_size) 
 void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int M, int N, int K, int tile_size, sim_sm::TraceLogger* logger = nullptr) {
     std::filesystem::create_directories("results");
     std::ofstream out("results/" + name + ".csv");
-    out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM\n";
+    out << "Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT\n";
 
-    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
+    SystemConfig gpu_config = config;
+    sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -483,13 +524,22 @@ void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int
     size_t total_mem_insts = 0;
     size_t total_mem_txns = 0;
 
+    size_t l1_hits = 0, l1_misses = 0;
+    size_t dirty_evicts = 0, bank_conflicts = 0;
     for (const auto& sm : gpu.get_sms()) {
         const auto& c = sm.get_counters();
         total_cycles += c.get_cycles();
         total_insts += c.get_instructions_retired();
         total_mem_insts += c.get_memory_instructions();
         total_mem_txns += c.get_memory_transactions();
+        dirty_evicts += c.get_dirty_eviction_writebacks();
+        bank_conflicts += c.get_bank_conflict_stalls();
+        const auto& l1_stats = sm.get_l1_cache().stats();
+        l1_hits += l1_stats.hits;
+        l1_misses += l1_stats.misses;
     }
+    size_t l2_hits = gpu.get_l2_cache().stats().hits;
+    size_t l2_misses = gpu.get_l2_cache().stats().misses;
 
     size_t max_cycles = 0;
     for (const auto& sm : gpu.get_sms()) {
@@ -498,10 +548,17 @@ void run_gemm_benchmark(const std::string& name, const SystemConfig& config, int
 
     double ipc = (max_cycles > 0) ? (double)total_insts / max_cycles : 0.0;
 
+    double l1_miss_rate = (l1_hits + l1_misses > 0) ? (double)l1_misses / (l1_hits + l1_misses) : 0.0;
+    double l2_miss_rate = (l2_hits + l2_misses > 0) ? (double)l2_misses / (l2_hits + l2_misses) : 0.0;
+    double amat = config.l1_latency + (l1_miss_rate * (config.l2_latency + l2_miss_rate * config.global_memory_latency)) +
+                  ((l1_hits + l1_misses > 0) ? ((double)dirty_evicts / (l1_hits + l1_misses) * config.writeback_latency) : 0.0);
+
     out << name << "," << config.num_sms << "," << max_cycles << ","
         << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
         << total_mem_insts << "," << total_mem_txns << ","
-        << occ.occupancy_percentage << "," << occ.resident_blocks << "\n";
+        << occ.occupancy_percentage << "," << occ.resident_blocks << ","
+        << l1_hits << "," << l1_misses << "," << l2_hits << "," << l2_misses << ","
+        << dirty_evicts << "," << bank_conflicts << "," << amat << "\n";
     out.close();
 }
 
@@ -512,10 +569,15 @@ void run_memcpy_benchmark(const std::string& name, const SystemConfig& config, s
     bool file_exists = std::filesystem::exists("results/" + name + ".csv");
     std::ofstream out("results/" + name + ".csv", std::ios::app);
     if (!file_exists) {
-        out << "Experiment,SMs,Pattern,TotalCycles,Instructions,IPC,MemInsts,MemTxns,EffectiveBandwidthBpc\n";
+        out << "Experiment,SMs,Pattern,TotalCycles,Instructions,IPC,MemInsts,MemTxns,EffectiveBandwidthBpc,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT\n";
     }
 
-    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
+    SystemConfig gpu_config = config;
+    // Ensure sufficient memory for strided accesses
+    if (gpu_config.global_memory_size < 10 * 1024 * 1024) {
+        gpu_config.global_memory_size = 10 * 1024 * 1024;
+    }
+    sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -583,13 +645,22 @@ void run_memcpy_benchmark(const std::string& name, const SystemConfig& config, s
     size_t total_mem_insts = 0;
     size_t total_mem_txns = 0;
 
+    size_t l1_hits = 0, l1_misses = 0;
+    size_t dirty_evicts = 0, bank_conflicts = 0;
     for (const auto& sm : gpu.get_sms()) {
         const auto& c = sm.get_counters();
         total_cycles += c.get_cycles();
         total_insts += c.get_instructions_retired();
         total_mem_insts += c.get_memory_instructions();
         total_mem_txns += c.get_memory_transactions();
+        dirty_evicts += c.get_dirty_eviction_writebacks();
+        bank_conflicts += c.get_bank_conflict_stalls();
+        const auto& l1_stats = sm.get_l1_cache().stats();
+        l1_hits += l1_stats.hits;
+        l1_misses += l1_stats.misses;
     }
+    size_t l2_hits = gpu.get_l2_cache().stats().hits;
+    size_t l2_misses = gpu.get_l2_cache().stats().misses;
 
     size_t max_cycles = 0;
     for (const auto& sm : gpu.get_sms()) {
@@ -602,10 +673,17 @@ void run_memcpy_benchmark(const std::string& name, const SystemConfig& config, s
     // each thread copies 4 bytes `iterations` times.
     double effective_bandwidth = (max_cycles > 0) ? (double)(num_threads * 4 * iterations) / max_cycles : 0.0;
 
+    double l1_miss_rate = (l1_hits + l1_misses > 0) ? (double)l1_misses / (l1_hits + l1_misses) : 0.0;
+    double l2_miss_rate = (l2_hits + l2_misses > 0) ? (double)l2_misses / (l2_hits + l2_misses) : 0.0;
+    double amat = config.l1_latency + (l1_miss_rate * (config.l2_latency + l2_miss_rate * config.global_memory_latency)) +
+                  ((l1_hits + l1_misses > 0) ? ((double)dirty_evicts / (l1_hits + l1_misses) * config.writeback_latency) : 0.0);
+
     out << name << "," << config.num_sms << "," << pattern << "," << max_cycles << ","
         << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
         << total_mem_insts << "," << total_mem_txns << ","
-        << std::fixed << std::setprecision(2) << effective_bandwidth << "\n";
+        << std::fixed << std::setprecision(2) << effective_bandwidth << ","
+        << l1_hits << "," << l1_misses << "," << l2_hits << "," << l2_misses << ","
+        << dirty_evicts << "," << bank_conflicts << "," << amat << "\n";
     out.close();
 }
 
@@ -655,7 +733,7 @@ sim_sm::Kernel generate_reduction_kernel(int block_size) {
     // 4. Thread 0 writes to global output
     int final_ssy = insts.size();
     insts.push_back({sim_sm::Opcode::SSY, -1, -1, -1, 0});
-    
+
     insts.push_back({sim_sm::Opcode::CMP, -1, 3, 19, 0}); // CMP R3(is_thread_0), 0
     int final_branch = insts.size();
     insts.push_back({sim_sm::Opcode::BRANCH, -1, -1, -1, 0});
@@ -667,7 +745,7 @@ sim_sm::Kernel generate_reduction_kernel(int block_size) {
     int final_sync_label = insts.size();
     insts[final_branch].immediate = final_sync_label - final_branch;
     insts[final_ssy].immediate = final_sync_label - final_ssy;
-    
+
     insts.push_back({sim_sm::Opcode::SYNC, 0, 0, 0, 0});
 
     return sim_sm::Kernel("reduction", insts);
@@ -733,7 +811,7 @@ sim_sm::Kernel generate_histogram_kernel(int num_bins, int block_size) {
     int after_hist = insts.size();
     insts[skip_hist_branch].immediate = after_hist - skip_hist_branch;
     insts[hist_ssy].immediate = after_hist - hist_ssy;
-    
+
     insts.push_back({sim_sm::Opcode::SYNC, 0, 0, 0, 0});
     insts.push_back({sim_sm::Opcode::BARRIER, 0, 0, 0, 0});
 
@@ -859,10 +937,15 @@ void run_reduction_benchmark(const std::string& name, const SystemConfig& config
     bool file_exists = std::filesystem::exists("results/" + name + ".csv");
     std::ofstream out("results/" + name + ".csv", std::ios::app);
     if (!file_exists) {
-        out << "Experiment,SMs,Elements,TotalCycles,WarpBarrierStallCycles,Instructions,IPC,MemInsts,MemTxns\n";
+        out << "Experiment,SMs,Elements,TotalCycles,WarpBarrierStallCycles,Instructions,IPC,MemInsts,MemTxns,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT\n";
     }
 
-    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
+    SystemConfig gpu_config = config;
+    // Ensure sufficient memory for reduction buffers
+    if (gpu_config.global_memory_size < 10 * 1024 * 1024) {
+        gpu_config.global_memory_size = 10 * 1024 * 1024;
+    }
+    sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -914,6 +997,8 @@ void run_reduction_benchmark(const std::string& name, const SystemConfig& config
     size_t total_mem_txns = 0;
     size_t total_barrier_stalls = 0;
 
+    size_t l1_hits = 0, l1_misses = 0;
+    size_t dirty_evicts = 0, bank_conflicts = 0;
     for (const auto& sm : gpu.get_sms()) {
         const auto& c = sm.get_counters();
         total_cycles += c.get_cycles();
@@ -921,7 +1006,14 @@ void run_reduction_benchmark(const std::string& name, const SystemConfig& config
         total_mem_insts += c.get_memory_instructions();
         total_mem_txns += c.get_memory_transactions();
         total_barrier_stalls += c.get_warp_barrier_stall_cycles();
+        dirty_evicts += c.get_dirty_eviction_writebacks();
+        bank_conflicts += c.get_bank_conflict_stalls();
+        const auto& l1_stats = sm.get_l1_cache().stats();
+        l1_hits += l1_stats.hits;
+        l1_misses += l1_stats.misses;
     }
+    size_t l2_hits = gpu.get_l2_cache().stats().hits;
+    size_t l2_misses = gpu.get_l2_cache().stats().misses;
 
     size_t max_cycles = 0;
     for (const auto& sm : gpu.get_sms()) {
@@ -930,9 +1022,16 @@ void run_reduction_benchmark(const std::string& name, const SystemConfig& config
 
     double ipc = (max_cycles > 0) ? (double)total_insts / max_cycles : 0.0;
 
+    double l1_miss_rate = (l1_hits + l1_misses > 0) ? (double)l1_misses / (l1_hits + l1_misses) : 0.0;
+    double l2_miss_rate = (l2_hits + l2_misses > 0) ? (double)l2_misses / (l2_hits + l2_misses) : 0.0;
+    double amat = config.l1_latency + (l1_miss_rate * (config.l2_latency + l2_miss_rate * config.global_memory_latency)) +
+                  ((l1_hits + l1_misses > 0) ? ((double)dirty_evicts / (l1_hits + l1_misses) * config.writeback_latency) : 0.0);
+
     out << name << "," << config.num_sms << "," << num_elements << "," << max_cycles << ","
         << total_barrier_stalls << "," << total_insts << "," << std::fixed << std::setprecision(2) << ipc << ","
-        << total_mem_insts << "," << total_mem_txns << "\n";
+        << total_mem_insts << "," << total_mem_txns << ","
+        << l1_hits << "," << l1_misses << "," << l2_hits << "," << l2_misses << ","
+        << dirty_evicts << "," << bank_conflicts << "," << amat << "\n";
     out.close();
 }
 
@@ -941,10 +1040,15 @@ void run_histogram_benchmark(const std::string& name, const SystemConfig& config
     bool file_exists = std::filesystem::exists("results/" + name + ".csv");
     std::ofstream out("results/" + name + ".csv", std::ios::app);
     if (!file_exists) {
-        out << "Experiment,SMs,Pattern,Elements,Bins,TotalCycles,WriteConflictStalls,Instructions,IPC\n";
+        out << "Experiment,SMs,Pattern,Elements,Bins,TotalCycles,WriteConflictStalls,Instructions,IPC,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT\n";
     }
 
-    sim_sm::GPU gpu(config.num_sms, 16, 4, 16, 8, 32, 10485760);
+    SystemConfig gpu_config = config;
+    // Ensure sufficient memory for large element arrays
+    if (gpu_config.global_memory_size < 10 * 1024 * 1024) {
+        gpu_config.global_memory_size = 10 * 1024 * 1024;
+    }
+    sim_sm::GPU gpu(gpu_config);
     if (logger) gpu.set_trace_logger(logger);
     for (auto& sm : gpu.get_sms()) {
         sm.set_scheduler(std::make_unique<sim_sm::RoundRobinScheduler>());
@@ -1005,12 +1109,21 @@ void run_histogram_benchmark(const std::string& name, const SystemConfig& config
     size_t total_insts = 0;
     size_t total_write_conflict_stalls = 0;
 
+    size_t l1_hits = 0, l1_misses = 0;
+    size_t dirty_evicts = 0, bank_conflicts = 0;
     for (const auto& sm : gpu.get_sms()) {
         const auto& c = sm.get_counters();
         total_cycles += c.get_cycles();
         total_insts += c.get_instructions_retired();
         total_write_conflict_stalls += c.get_stalls(sim_sm::StallReason::WriteConflict);
+        dirty_evicts += c.get_dirty_eviction_writebacks();
+        bank_conflicts += c.get_bank_conflict_stalls();
+        const auto& l1_stats = sm.get_l1_cache().stats();
+        l1_hits += l1_stats.hits;
+        l1_misses += l1_stats.misses;
     }
+    size_t l2_hits = gpu.get_l2_cache().stats().hits;
+    size_t l2_misses = gpu.get_l2_cache().stats().misses;
 
     size_t max_cycles = 0;
     for (const auto& sm : gpu.get_sms()) {
@@ -1025,9 +1138,16 @@ void run_histogram_benchmark(const std::string& name, const SystemConfig& config
 
     double ipc = (max_cycles > 0) ? (double)total_insts / max_cycles : 0.0;
 
+    double l1_miss_rate = (l1_hits + l1_misses > 0) ? (double)l1_misses / (l1_hits + l1_misses) : 0.0;
+    double l2_miss_rate = (l2_hits + l2_misses > 0) ? (double)l2_misses / (l2_hits + l2_misses) : 0.0;
+    double amat = config.l1_latency + (l1_miss_rate * (config.l2_latency + l2_miss_rate * config.global_memory_latency)) +
+                  ((l1_hits + l1_misses > 0) ? ((double)dirty_evicts / (l1_hits + l1_misses) * config.writeback_latency) : 0.0);
+
     out << name << "," << config.num_sms << "," << pattern << "," << num_elements << "," << num_bins << "," << max_cycles << ","
         << total_write_conflict_stalls << "," << total_insts << ","
-        << std::fixed << std::setprecision(2) << ipc << "\n";
+        << std::fixed << std::setprecision(2) << ipc << ","
+        << l1_hits << "," << l1_misses << "," << l2_hits << "," << l2_misses << ","
+        << dirty_evicts << "," << bank_conflicts << "," << amat << "\n";
     out.close();
 }
 

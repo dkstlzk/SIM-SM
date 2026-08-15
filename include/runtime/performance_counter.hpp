@@ -43,6 +43,12 @@ public:
     void add_warp_barrier_stall_cycles(size_t count);
     size_t get_warp_barrier_stall_cycles() const;
 
+    void add_bank_conflict_stalls(size_t count);
+    size_t get_bank_conflict_stalls() const;
+
+    void add_dirty_eviction_writebacks(size_t count);
+    size_t get_dirty_eviction_writebacks() const;
+
     // Trace hooks
     void set_trace_logger(TraceLogger* logger);
     void record_scheduler_event(size_t sm_id, size_t cycle, const std::string& scheduler_name, size_t selected_warp_id, const std::vector<Warp>& warps);
@@ -56,7 +62,10 @@ private:
     size_t memory_instructions_{0};
     size_t memory_transactions_{0};
     size_t warp_barrier_stall_cycles_{0};
-    
+
+    size_t bank_conflict_stalls_{0};
+    size_t dirty_eviction_writebacks_{0};
+
     TraceLogger* trace_logger_{nullptr};
 };
 
