@@ -1,2 +1,2 @@
-Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM
-matrix_multiply_32x32_tile16,4,21568,21568,1.00,2336,70272,1.00,8
+Experiment,SMs,TotalCycles,Instructions,IPC,MemInsts,MemTxns,Occupancy,BlocksPerSM,L1Hits,L1Misses,L2Hits,L2Misses,DirtyEvictions,BankConflicts,AMAT
+matrix_multiply_32x32_tile16,4,21582,21568,1.00,2336,70272,1.00,8,0,640,256,384,112,0,88.50

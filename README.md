@@ -1,33 +1,40 @@
-# SIM-SM: CUDA Streaming Multiprocessor Simulator
+# SIM-SM: CUDA-like GPU Architecture Simulator
 
-SIM-SM is a cycle-level educational architectural simulator for a CUDA-like Streaming Multiprocessor (SM). It models a deliberately constrained subset of GPU execution, including warp scheduling, memory hierarchy, memory coalescing, occupancy, forward divergence, and block-level synchronization.
+SIM-SM is a cycle-level educational CUDA-like GPU architecture simulator implemented in C++17. It models SM/warp execution, configurable warp scheduling, hierarchical memory, coalescing, occupancy, constrained divergence and synchronization, multiple benchmark workloads, and architectural performance analysis with causal bottleneck validation.
 
-## Week 1 Features & Capabilities
+## Current capabilities:
+- GPU/SM/warp/thread hierarchy
+- Custom ISA and execution
+- RR / Greedy / Priority / GTO / OldestFirst / TwoLevel scheduling
+- L1/L2/shared/global memory
+- Cache replacement policies (LRU, FIFO, Random)
+- Memory coalescing
+- Divergence and barriers
+- Occupancy/resource modeling
+- Performance counters
+- Vector Add
+- Memcpy
+- Reduction
+- Histogram
+- Matrix Multiply
+- Architectural parameter sweeps
+- Bottleneck diagnosis
+- Markdown architectural reports
 
-- **GPU Hierarchy**: Hierarchical software model of GPU, SM, Thread Blocks, Warps, and Threads.
-- **Instruction Set & Execution**: A custom lightweight ISA supporting standard ALU operations, branching, loads, stores, and barriers.
-- **Warp Scheduling**: Cycle-level SM tick mechanism with configurable schedulers (Round-Robin, Greedy, Priority).
-- **Memory Subsystem**: L1/L2 caches, Shared Memory, Global Memory, pluggable cache replacement policies (LRU, FIFO, Random), and access latencies (AMAT).
-- **Memory Coalescing**: **Warp-level global memory coalescing modeled using cache-line transactions.**
-- **Multi-Wave Dispatch & Occupancy**: Accurate SM resource tracking (Registers, Shared Memory, Threads) allowing for multiple resident blocks, dynamically dispatching based on occupancy.
-- **Constrained Divergence & Synchronization**: 
-  - Forward-divergence paths correctly isolate non-participating threads.
-  - Block-scoped `BARRIER` synchronization modeled at the SM level.
-  - Strict malformed barrier and divergence exception detection.
-- **Comprehensive Benchmarks**: Built-in CLI for executing complex kernels (e.g., Vector Add, Cache Stress, Matrix Multiply) and logging occupancy and IPC metrics to CSVs.
-
-## Test Suite
-
+## Test status
 The simulator is rigorously verified via GoogleTest suites covering component-level edge cases and complete system-level integration.
 
-Currently running **53/53** passing `ctest` regression tests:
+Currently running **98/98** passing `ctest` regression tests:
 
 - **Architecture Tests**: Verifies hierarchy, partial warps, block occupancy, and structural barrier invariants.
 - **Execution Tests**: Instruction level testing of math, load/store semantics, branching, and boundaries.
-- **Scheduling Tests**: Unit/integration tests for Greedy, Round-Robin, and Priority scheduler policies.
-- **Memory Tests**: Checks cache associativity, LRU/FIFO/Random eviction, hit/miss ratios, and multi-tier access times.
+- **Scheduling Tests**: Unit/integration tests for Greedy, Round-Robin, Priority, GTO, OldestFirst, and TwoLevel scheduler policies.
+- **Memory Tests**: Checks cache associativity, LRU/FIFO/Random eviction, hit/miss ratios, writeback, and multi-tier access times.
 - **Coalescing Tests**: Verifies transaction merging across sequential, strided, and scattered memory access patterns.
 - **Divergence & Synchronization Tests**: Enforces proper `BARRIER` stalls, multi-warp release invariants, and malformed barrier detection for mismatched thread PCs within warps.
+- **Occupancy Tests**: Validates max threads, blocks, shared memory, and registers limits.
+- **Analysis Tests**: Verifies bottleneck diagnosis, delta calculations, Cartesian sweeps, and causal evidence isolation.
+- **Benchmark Tests**: Validates full correctness of workloads, including a dedicated CPU-validation step for GEMM (Matrix Multiply).
 
 ## Building and Testing
 
@@ -36,26 +43,21 @@ Requirements: `CMake 3.14+`, a C++17 compliant compiler.
 ```bash
 mkdir build && cd build
 cmake ..
-make -j4
+make -j8
 
 # Run all tests
 ctest --output-on-failure
 ```
 
-## Running Benchmarks and Tracing
+## Running Benchmarks and Analysis
 
-SIM-SM includes a command-line interface to execute internal benchmark scenarios (Cache Stress, Scheduler sweep, Coalescing Sweep, Vector Add).
-
-- `basic`: A simple vector addition kernel.
-- `priority`: A synthetic benchmark where threads have explicitly assigned priorities to test priority-based scheduling policies.
-- `memcpy`: Memory copy kernel verifying contiguous and strided global memory access patterns.
-- `reduction`: Parallel reduction kernel demonstrating multi-round thread synchronization using explicit `BARRIER` instructions.
-- `histogram`: Parallel histogram generation demonstrating atomic-like `WRITE_CONFLICT` stalls during colliding shared memory stores.
+SIM-SM includes a command-line interface to execute internal benchmark scenarios and architectural parameter sweeps.
 
 ### Running Benchmarks
 Run a specific benchmark using the `--benchmark` flag:
 
 ```bash
+./build/gpu-sim --config configs/small_gpu.json --benchmark matrix_multiply
 ./build/gpu-sim --config configs/small_gpu.json --benchmark all
 ./build/gpu-sim --config configs/small_gpu.json --benchmark basic
 ./build/gpu-sim --config configs/small_gpu.json --benchmark priority
@@ -65,7 +67,15 @@ Run a specific benchmark using the `--benchmark` flag:
 ```
 *Results are output as CSV files in the `results/` directory.*
 
-### Debug / Trace Mode (Extension 3)
+### Running Architectural Analysis
+Run the automated Cartesian parameter sweep and bottleneck diagnosis:
+
+```bash
+./build/gpu-sim --config configs/small_gpu.json --analyze
+```
+*A detailed Markdown report is generated in `results/architectural_analysis_report.md`.*
+
+### Debug / Trace Mode
 
 You can capture a per-cycle execution trace of the GPU model to observe scheduling, memory, and cache events.
 
@@ -79,9 +89,3 @@ You can capture a per-cycle execution trace of the GPU model to observe scheduli
 # Redirect trace to a file
 ./build/gpu-sim --config configs/small_gpu.json --debug --trace-file my_trace.log --benchmark basic
 ```
-
-## Future Work (Week 2+)
-
-- Reconvergence stack (SIMT mask) for arbitrary divergence topologies.
-- Bank conflict modeling in Shared Memory.
-- True multi-SM interconnect modeling and L2 slice partitioning.

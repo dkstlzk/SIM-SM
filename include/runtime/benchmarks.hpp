@@ -15,4 +15,7 @@ namespace sim_sm {
 
     sim_sm::Kernel generate_histogram_kernel(int num_bins, int block_size);
     sim_sm::Grid build_histogram_grid(size_t num_elements, size_t block_size, size_t warp_size, size_t num_bins);
+
+    sim_sm::Kernel generate_gemm_kernel(int M, int N, int K, int tile_size);
+    sim_sm::Grid build_gemm_grid(int M, int N, int K, int tile_size, int warp_size);
 }

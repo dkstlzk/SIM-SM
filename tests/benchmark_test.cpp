@@ -278,3 +278,63 @@ TEST(BenchmarkTest, AtomicAddDistinctAddresses) {
     size_t conflicts = gpu.get_sms()[0].get_counters().get_stalls(sim_sm::StallReason::WriteConflict);
     EXPECT_EQ(conflicts, 0);
 }
+
+TEST(BenchmarkTest, GemmCorrectness) {
+    SystemConfig config;
+    config.num_sms = 1;
+    config.block_size = 64;
+    config.warp_size = 32;
+    config.max_blocks_per_sm = 16;
+    config.max_threads_per_sm = 1024;
+    config.max_shared_memory_per_sm = 65536;
+    config.max_registers_per_sm = 65536;
+
+    sim_sm::GPU gpu(config);
+    sim_sm::GlobalMemory& gm = gpu.get_global_memory();
+
+    int M = 4, N = 4, K = 4, tile_size = 2;
+    size_t A_base = 0;
+    size_t B_base = M * K * 4;
+    size_t C_base = M * K * 4 + K * N * 4;
+
+    std::vector<int> cpu_A(M * K);
+    std::vector<int> cpu_B(K * N);
+    std::vector<int> cpu_C(M * N, 0);
+
+    for (int i = 0; i < M * K; ++i) {
+        int val = (i % 5) + 1;
+        cpu_A[i] = val;
+        gm.store(A_base + i * 4, val);
+    }
+    for (int i = 0; i < K * N; ++i) {
+        int val = (i % 7) + 1;
+        cpu_B[i] = val;
+        gm.store(B_base + i * 4, val);
+    }
+
+    for (int row = 0; row < M; ++row) {
+        for (int col = 0; col < N; ++col) {
+            int sum = 0;
+            for (int k = 0; k < K; ++k) {
+                sum += cpu_A[row * K + k] * cpu_B[k * N + col];
+            }
+            cpu_C[row * N + col] = sum;
+        }
+    }
+
+    sim_sm::Kernel kernel = generate_gemm_kernel(M, N, K, tile_size);
+    sim_sm::Grid grid = build_gemm_grid(M, N, K, tile_size, config.warp_size);
+
+    sim_sm::KernelResourceRequirements req = {32, (size_t)(tile_size * tile_size * 2 * 4)};
+
+    gpu.launch_kernel(kernel, grid, config, req);
+    gpu.run_to_completion(kernel);
+
+    for (int row = 0; row < M; ++row) {
+        for (int col = 0; col < N; ++col) {
+            int gpu_val = gm.load(C_base + (row * N + col) * 4);
+            int cpu_val = cpu_C[row * N + col];
+            EXPECT_EQ(gpu_val, cpu_val);
+        }
+    }
+}

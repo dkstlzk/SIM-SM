@@ -17,7 +17,7 @@ enum class Opcode {
     SYNC
 };
 
-// Operand conventions for the Week 1 toy ISA:
+// Operand conventions for the core ISA and post-Week-1 additions:
 //
 // MOV    dst, src1
 // MOV    dst, immediate   (encoded with src1 = -1)
