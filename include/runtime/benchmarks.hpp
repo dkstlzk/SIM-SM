@@ -5,6 +5,7 @@
 
 namespace sim_sm {
     void run_benchmarks(const std::string& config_path, const std::string& b_type = "all", bool debug_mode = false, int trace_level = 7, const std::string& trace_file = "");
+    void run_analysis(const std::string& config_path);
 
     sim_sm::Kernel generate_memcpy_kernel(int iterations);
     sim_sm::Grid build_memcpy_grid(size_t num_threads, size_t block_size, size_t warp_size, const std::string& pattern);

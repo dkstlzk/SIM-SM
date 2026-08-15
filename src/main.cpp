@@ -52,6 +52,9 @@ int main(int argc, char** argv) {
                     i++;
                 }
             }
+        } else if (arg == "--analyze") {
+            run_benchmarks = true;
+            b_type = "analyze";
         } else {
             print_usage(argv[0]);
             return EXIT_FAILURE;
@@ -66,8 +69,12 @@ int main(int argc, char** argv) {
 
     if (run_benchmarks) {
         try {
-            sim_sm::run_benchmarks(config_path, b_type, debug_mode, trace_level_val, trace_file);
-            std::cout << "Benchmarks completed successfully. Results written to /results/\n";
+            if (b_type == "analyze") {
+                sim_sm::run_analysis(config_path);
+            } else {
+                sim_sm::run_benchmarks(config_path, b_type, debug_mode, trace_level_val, trace_file);
+                std::cout << "Benchmarks completed successfully. Results written to /results/\n";
+            }
             return EXIT_SUCCESS;
         } catch (const std::exception& e) {
             std::cerr << "Benchmark error: " << e.what() << "\n";

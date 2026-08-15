@@ -3,14 +3,16 @@
 #include "architecture/kernel.hpp"
 #include "architecture/grid.hpp"
 #include "architecture/occupancy.hpp"
-#include "scheduling/round_robin_scheduler.hpp"
-#include "scheduling/greedy_scheduler.hpp"
-#include "scheduling/priority_scheduler.hpp"
+#include "runtime/config.hpp"
 #include "runtime/trace_logger.hpp"
+#include "analysis/analysis_types.hpp"
+#include "analysis/sweep_engine.hpp"
+#include "analysis/analyzer.hpp"
+#include "analysis/report_generator.hpp"
 #include <iostream>
 #include <fstream>
-#include <iomanip>
 #include <filesystem>
+#include <iomanip>
 
 namespace sim_sm {
 
@@ -1260,6 +1262,36 @@ void run_benchmarks(const std::string& config_path, const std::string& b_type, b
         large_block.block_size = 256;
         run_experiment("occupancy_256", large_block, "rr", false, 4, 4, logger.get());
     }
+}
+
+void run_analysis(const std::string& config_path) {
+    SystemConfig base_config = load_config(config_path);
+
+    ParameterSpace space;
+    space.scheduler_policies = {"RR", "GTO", "OldestFirst", "TwoLevel"};
+    space.l1_sets = {4, 8, 16};
+    
+    // Create a vector add kernel
+    size_t num_threads = 2048;
+    sim_sm::KernelResourceRequirements req = {10, 0};
+    sim_sm::Kernel kernel = generate_vector_add_kernel(100);
+    sim_sm::Grid grid = build_benchmark_grid(num_threads, base_config.block_size, base_config.warp_size, false);
+
+    SweepEngine sweeper;
+    std::cout << "Starting Architectural Analysis Sweep...\n";
+    std::vector<SimulationResult> results = sweeper.run_sweep(base_config, kernel, grid, req, space);
+
+    ArchitecturalAnalyzer analyzer;
+    std::vector<AnalysisResult> analysis_res = analyzer.analyze(results, 0);
+
+    std::string report = ReportGenerator::generate_markdown_report(analysis_res);
+    
+    std::filesystem::create_directories("results");
+    std::ofstream out("results/architectural_analysis_report.md");
+    out << report;
+    out.close();
+
+    std::cout << "\nArchitectural Analysis complete. Report written to results/architectural_analysis_report.md\n";
 }
 
 } // namespace sim_sm
